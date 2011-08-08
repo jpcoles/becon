@@ -1,0 +1,94 @@
+\documentclass{article}
+
+\begin{document}
+
+Let $\rho = \rho(x,t)$ and $R^2 \equiv \rho$.
+%
+\begin{equation}
+\label{wave}
+\Psi = R e^{i\phi}
+\end{equation}
+%
+\begin{equation}
+\label{Schroedinger}
+i\Psi_t = -\frac{\hbar}{2m}\Psi_{xx}
+\end{equation}
+%
+Take the time derivative of Equation \ref{wave}:
+%
+\begin{equation}
+\label{S.dt}
+i\Psi_t = i\left(R_t e^{i\phi} + iR\phi_t e^{i\phi}\right)
+        = \left(i\frac{R_t}{R} - \phi_t\right)\Psi
+\end{equation}
+%
+Now the first and second spacial derivaties:
+%
+\begin{equation}
+\Psi_x = R_x e^{i\phi} + iR\phi_x e^{i\phi}
+\end{equation}
+%
+\begin{equation}
+\label{wave.dxdx}
+\begin{array}{rcl}
+\Psi_{xx} &=& R_{xx} e^{i\phi} + iR_x\phi_x e^{i\phi}
+          + iR_x\phi_x e^{i\phi} + iR\phi_{xx} e^{i\phi}
+          - R\phi_x^2 e^{i\phi} \\
+          &=& \Psi\left(\frac{R_{xx}}{R} + 2i\frac{\phi_xR_x}{R} + i\phi_{xx} - \phi_x^2\right)
+\end{array}
+\end{equation}
+%
+Combine Equations \ref{Schroedinger}, \ref{S.dt}, \ref{wave.dxdx}
+%
+\begin{equation}
+i\frac{R_t}{R} - \phi_t = -\frac{\hbar}{2m}\left(\frac{R_{xx}}{R} + 2i\frac{\phi_xR_x}{R} + i\phi_{xx} - \phi_x^2\right)
+\end{equation}
+%
+Identify real and imaginary parts:
+%
+\begin{equation}
+\label{real}
+\frac{R_t}{R} = -\frac{\hbar}{2m}\left(2\frac{\phi_xR_x}{R} + \phi_{xx}\right)
+\end{equation}
+%
+\begin{equation}
+\label{imag}
+\phi_t = \frac{\hbar}{2m}\left(\frac{R_{xx}}{R} - \phi_x^2\right)
+\end{equation}
+ 
+Let $v \equiv \frac{\hbar}{m}\phi_x$. We seek a continuity equation of the form
+%
+\begin{equation}
+\rho_t + \nabla (\rho v) = 0
+\end{equation}
+%
+Multiplying through by $R^2$ and writing in terms of $v$ Equation \ref{real} becomes
+\begin{equation}
+R R_t + \frac{R^2}{2}v_x + R R_x v = 0
+\end{equation}
+
+We now seek an equation for the conservation of momentum. Take the spacial derivative of Equation \ref{imag}:
+%
+\begin{equation}
+\phi_{xt} = \frac{\hbar}{2m}\left(\left(\frac{R_{xx}}{R}\right)_x - 2\phi_x\phi_{xx}\right)
+\end{equation}
+%
+Multiplying through by $\hbar/m$ and writing in terms of $v$ we have
+%
+\begin{equation}
+v_t + vv_x = \left(\frac{\hbar}{m}\right)^2\left(\frac{R_{xx}}{2R}\right)_x
+\end{equation}
+%
+For more spacial dimensions we can write
+%
+\begin{equation}
+\frac{d\vec v}{dt} 
+  = \frac{\partial \vec v}{\partial t} + \vec v \cdot \nabla \vec v
+  = \left(\frac{\hbar}{m}\right)^2 \vec \nabla \left(\frac{\nabla^2 \sqrt{\rho}}{2\rho}\right)
+\end{equation}
+
+
+%\begin{equation}
+%\end{equation}
+
+\end{document}
