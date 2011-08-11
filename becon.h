@@ -16,7 +16,7 @@ struct space
     double xmin, xmax;
     double ymin, ymax;
     double zmin, zmax;
-    int Nx, Ny, Nz;
+    int32_t Nx, Ny, Nz;
     double drx, dry, drz;
     double dkx, dky, dkz;
 };

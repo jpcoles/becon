@@ -7,6 +7,20 @@
 #include "becon.h"
 #include "log.h"
 #include "io_grafic.h"
+#include "io_image.h"
+#include "frame_buffer.h"
+
+inline int imin(int a, int b)
+{
+    if (a < b) return a;
+    return b;
+}
+
+inline int imax(int a, int b)
+{
+    if (a > b) return a;
+    return b;
+}
 
 
 void ic_init_test1D(struct state *state, struct space *space)
@@ -47,7 +61,7 @@ void ic_init_test1D(struct state *state, struct space *space)
 
 void ic_test1D(struct state *s, struct space *sp)
 {
-    int x;
+    int32_t x;
 
     Log("Creating test1D initial conditions...\n");
 
@@ -69,24 +83,25 @@ void ic_test1D(struct state *s, struct space *sp)
 
 void write_state(struct state *s, struct space *sp)
 {
-    int i,x,y,z;
+    size_t idx=0;
+    int i,j,k;
 
     i=0;
     if (sp->Nz > 1) fprintf(stdout, "[");
-    for (z=0; z < sp->Nz; z++)
+    for (k=0; k < sp->Nz; k++)
     {
-        if (z > 0) fprintf(stdout, ",");
+        if (k > 0) fprintf(stdout, ",");
         if (sp->Ny > 1) fprintf(stdout, "[");
-        for (y=0; y < sp->Ny; y++)
+        for (j=0; j < sp->Ny; j++)
         {
-            if (y > 0) fprintf(stdout, ",");
+            if (j > 0) fprintf(stdout, ",");
             fprintf(stdout, "[");
-            for (x=0; x < sp->Nx; x++)
+            for (i=0; i < sp->Nx; i++)
             {
-                if (x > 0) fprintf(stdout, ", ");
-                //fprintf(stdout, "%.3g+%.3gj", s->phi[i][0], s->phi[i][1]);
-                fprintf(stdout, "%.3g+%.3gj", s->psi[i][0], s->psi[i][1]);
-                //fprintf(stdout, "%.3g+%.3gj", s->rho[i][0], s->rho[i][1]);
+                if (i > 0) fprintf(stdout, ", ");
+                //fprintf(stdout, "%.3g+%.3gj", s->phi[idx][0], s->phi[idx][1]);
+                fprintf(stdout, "%.3g+%.3gj", s->psi[idx][0], s->psi[idx][1]);
+                //fprintf(stdout, "%.3g+%.3gj", s->rho[idx][0], s->rho[idx][1]);
                 i++;
             }
             fprintf(stdout, "]");
@@ -102,7 +117,8 @@ void phi_harmonic_oscillator(struct state *s, struct space *sp,
                              double x, double y, double z, 
                              double rx, double ry, double rz)
 {
-    int i,j,k;
+    int32_t i,j,k;
+    size_t idx=0;
 
     for (k=0; k < sp->Nz; k++)
     for (j=0; j < sp->Ny; j++)
@@ -112,25 +128,24 @@ void phi_harmonic_oscillator(struct state *s, struct space *sp,
         double y0 = j*sp->dry + sp->ymin;
         double z0 = k*sp->drz + sp->zmin;
 
-        int I = k * (sp->Nx*sp->Ny) + j*sp->Nx + i;
-        //s->phi[I][0] = 1000*pow(x0-x, 2);
+        //s->phi[idx][0] = 1000*pow(x0-x, 2);
 
 #if 1
         if (x-rx <= x0 && x0 <= x+rx) {
         if (y-ry <= y0 && y0 <= y+ry) {
         if (z-rz <= z0 && z0 <= z+rz)
         {
-            int I = k * (sp->Nx*sp->Ny) + j*sp->Nx + i;
-            s->phi[I][0] += 0;
-            s->phi[I][1] += 0;
+            s->phi[idx][0] += 0;
+            s->phi[idx][1] += 0;
         }}}
         else
         {
-            int I = k * (sp->Nx*sp->Ny) + j*sp->Nx + i;
-            s->phi[I][0] += 1e12;
-            s->phi[I][1] += 0;
+            s->phi[idx][0] += 1e12;
+            s->phi[idx][1] += 0;
         }
 #endif
+
+        idx++;
     }
 }
 
@@ -146,12 +161,15 @@ inline void kxyz(int i, struct space *s, double *x, double *y, double *z)
 
 int main(int argc, char **argv)
 {
-    int i;
-    size_t nthreads = 1; //omp_get_num_threads();
+    size_t idx;
+    size_t nthreads = 2; //omp_get_num_threads();
     struct state state;
     struct space space;
     struct plans plans;
     struct options opts;
+    struct frame_buffer fb;
+
+    int32_t i,j,k;
 
     //double dt = 1e-8;
     //double tmax = dt * 0; //1.0001;; //1.0;
@@ -160,14 +178,16 @@ int main(int argc, char **argv)
     int step;
 
     opts.with_gravity = 1;
-    opts.dt = 1e-8;
-    opts.tmax = opts.dt * 0;
+    opts.dt = 1e-5;
+    opts.tmax = opts.dt * 1000;
 
     if (alloc_grafic("graficICs/level0", &state, &space) != 0)
     {
         Log("Failed to read input.\n");
         exit(1);
     }
+
+    alloc_frame_buffer(&fb, imin(256, space.Nx), imin(256, space.Ny));
 
     fftw_init_threads();
     fftw_plan_with_nthreads(nthreads);
@@ -193,6 +213,10 @@ int main(int argc, char **argv)
 
     //ic_test1D(&state, &space);
 
+    assert((space.Nx & 1) == 0);
+    assert((space.Ny & 1) == 0);
+    assert((space.Nz & 1) == 0);
+
     Log("Running simulation...\n");
 
     //write_state(&state, &space);
@@ -205,28 +229,38 @@ int main(int argc, char **argv)
         // Drift
         //----------------------------------------------------------------------
         fftw_execute(plans.psi_f);
-        for (i=0; i < state.N; i++)
+        size_t idx = 0;
+        for (k=0; k < space.Nz; k++)
+        for (j=0; j < space.Ny; j++)
+        for (i=0; i < space.Nx; i++)
         {
             double k2, x,y,z;
 
-            kxyz(i, &space, &x,&y,&z);
-            k2 = x*x + y*y + z*z;
+            //kxyz(i, &space, &x,&y,&z);
+            //k2 = x*x + y*y + z*z;
+
+            k2 = pow(((i + (space.Nx>>1))%space.Nx)*space.dkx,2)
+               + pow(((j + (space.Ny>>1))%space.Ny)*space.dky,2)
+               + pow(((k + (space.Nz>>1))%space.Nz)*space.dkz,2);
 
             k2 /= 2;
 
             double c = cos(k2 * opts.dt);
             double s = sin(k2 * opts.dt);
-            double p0 = state.psi[i][0];
-            double p1 = state.psi[i][1];
+            double p0 = state.psi[idx][0];
+            double p1 = state.psi[idx][1];
 
-            state.psi[i][0] = c*p0 - s*p1;
-            state.psi[i][1] = c*p1 + s*p0;
+            state.psi[idx][0] = c*p0 - s*p1;
+            state.psi[idx][1] = c*p1 + s*p0;
+
+            idx++;
         }
+
         fftw_execute(plans.psi_b);
-        for (i=0; i < state.N; i++)
+        for (idx=0; idx < state.N; idx++)
         {
-            state.psi[i][0] /= state.N;
-            state.psi[i][1] /= state.N;
+            state.psi[idx][0] /= state.N;
+            state.psi[idx][1] /= state.N;
         }
 
         if (opts.with_gravity)
@@ -235,36 +269,45 @@ int main(int argc, char **argv)
             // Gravity
             //----------------------------------------------------------------------
             double prob_tot = 0;
-            for (i=0; i < state.N; i++)
+            for (idx=0; idx < state.N; idx++)
             {
-                state.rho[i][0] = pow(hypot(state.psi[i][0], state.psi[i][1]),2);
-                state.rho[i][1] = 0;
+                state.rho[idx][0] = pow(state.psi[idx][0],2) + pow(state.psi[idx][1],2);
+                state.rho[idx][1] = 0;
 
-                state.phi[i][0] = 0;
-                state.phi[i][1] = 0;
-                prob_tot += state.rho[i][0];
+                state.phi[idx][0] = 0;
+                state.phi[idx][1] = 0;
+                prob_tot += state.rho[idx][0];
             }
 
-            Log("Total Probability is %f\n", prob_tot);
+            //Log("Total Probability is %f\n", prob_tot);
             fftw_execute(plans.rho_f);
-            for (i=0; i < state.N; i++)
+            idx = 0;
+            for (k=0; k < space.Nz; k++)
+            for (j=0; j < space.Ny; j++)
+            for (i=0; i < space.Nx; i++)
             {
                 double k2, x,y,z;
 
-                kxyz(i, &space, &x, &y, &z);
-                k2 = x*x + y*y + z*z;
-                //if (fdim(k2,1e-8) > 0)
+                //kxyz(i, &space, &x,&y,&z);
+                //k2 = x*x + y*y + z*z;
+
+                k2 = pow(((i + (space.Nx>>1))%space.Nx)*space.dkx,2)
+                   + pow(((j + (space.Ny>>1))%space.Ny)*space.dky,2)
+                   + pow(((k + (space.Nz>>1))%space.Nz)*space.dkz,2);
+
                 if (fabs(k2) > 1e-12)
                 {
-                    state.phi[i][0] = state.rho[i][0] / k2;
-                    state.phi[i][1] = 0;
+                    state.phi[idx][0] = state.rho[idx][0] / k2;
+                    state.phi[idx][1] = 0;
                 }
+
+                idx++;
             }
             fftw_execute(plans.phi_b);
-            for (i=0; i < state.N; i++)
+            for (idx=0; idx < state.N; idx++)
             {
-                state.phi[i][0] /= state.N;
-                state.phi[i][1] /= state.N;
+                state.phi[idx][0] /= state.N;
+                state.phi[idx][1] /= state.N;
             }
         }
 
@@ -273,29 +316,34 @@ int main(int argc, char **argv)
         //----------------------------------------------------------------------
         // Kick
         //----------------------------------------------------------------------
-        for (i=0; i < state.N; i++)
+        for (idx=0; idx < state.N; idx++)
         {
-            double p0 = state.psi[i][0];
-            double p1 = state.psi[i][1];
-            double c = cos(state.phi[i][0] * opts.dt/2.);
-            double s = sin(state.phi[i][0] * opts.dt/2.);
+            double p0 = state.psi[idx][0];
+            double p1 = state.psi[idx][1];
+            double c = cos(state.phi[idx][0] * opts.dt/2.);
+            double s = sin(state.phi[idx][0] * opts.dt/2.);
 
-            state.psi[i][0] = c*p0 - s*p1;
-            state.psi[i][1] = c*p1 + s*p0;
+            state.psi[idx][0] = c*p0 - s*p1;
+            state.psi[idx][1] = c*p1 + s*p0;
 
             //fprintf(stderr, "p0/p1  %f %f -> %f %f / %f\n", p0, p1, state.psi[i][0], state.psi[i][1], state.phi[i][0]*dt);
         }
 
-#if 0
-        fftw_execute(plans.rho_f);
-        for (i=0; i < N; i++)
+#if 1
+        fftw_execute(plans.rho_b);
+        for (idx=0; idx < state.N; idx++)
         {
-            state.rho[i][0] /= N;
-            state.rho[i][1] /= N;
+            state.rho[idx][0] /= state.N;
+            state.rho[idx][1] /= state.N;
         }
 #endif
 
-        write_state(&state, &space);
+        if (step % 10 == 0)
+        {
+            //write_state(&state, &space);
+            capture_image(&space, &state, &fb);
+            write_image("frames/becon.%05i.jpg", step, &fb);
+        }
     }
 
     Log("Simulation complete.\n");
@@ -313,6 +361,8 @@ int main(int argc, char **argv)
     fftw_free(state.psi);
     fftw_free(state.phi);
     fftw_free(state.rho);
+
+    free_frame_buffer(&fb);
 
     return EXIT_SUCCESS;
 }
