@@ -9,6 +9,7 @@
 #include "io_grafic.h"
 #include "io_image.h"
 #include "frame_buffer.h"
+#include "cmap.h"
 
 inline int imin(int a, int b)
 {
@@ -23,6 +24,9 @@ inline int imax(int a, int b)
 }
 
 
+//==============================================================================
+//                                ic_init_test1D
+//==============================================================================
 void ic_init_test1D(struct state *state, struct space *space)
 {
     Log("Preparing test1D initial conditions...\n");
@@ -52,6 +56,8 @@ void ic_init_test1D(struct state *state, struct space *space)
 
     size_t N = space->Nx * space->Ny * space->Nz;
 
+    state->N = N;
+
     Log("    %ld grid cells.\n", N);
 
     state->psi = (fftw_complex*) fftw_malloc(sizeof(*state->psi) * N);
@@ -59,6 +65,9 @@ void ic_init_test1D(struct state *state, struct space *space)
     state->rho = (fftw_complex*) fftw_malloc(sizeof(*state->rho) * N);
 }
 
+//==============================================================================
+//                                  ic_test1D
+//==============================================================================
 void ic_test1D(struct state *s, struct space *sp)
 {
     int32_t x;
@@ -67,7 +76,8 @@ void ic_test1D(struct state *s, struct space *sp)
 
     for (x=0; x < sp->Nx; x++)
     {
-        s->psi[x][0] = exp(-140 * pow(sp->xmin + x*sp->drx, 2));
+        s->psi[x][0] = exp(-1 * pow(sp->xmin + x*sp->drx, 2));
+        //fprintf(stderr, "%f\n", s->psi[x][0]);
 
         //s->psi[x][0] = cos(2*M_PI * x/sp->Nx);
         //s->psi[x][0] = 1e-5 * cos(2*M_PI * x/L);
@@ -81,6 +91,9 @@ void ic_test1D(struct state *s, struct space *sp)
     }
 }
 
+//==============================================================================
+//                                 write_state
+//==============================================================================
 void write_state(struct state *s, struct space *sp)
 {
     size_t idx=0;
@@ -102,7 +115,7 @@ void write_state(struct state *s, struct space *sp)
                 //fprintf(stdout, "%.3g+%.3gj", s->phi[idx][0], s->phi[idx][1]);
                 fprintf(stdout, "%.3g+%.3gj", s->psi[idx][0], s->psi[idx][1]);
                 //fprintf(stdout, "%.3g+%.3gj", s->rho[idx][0], s->rho[idx][1]);
-                i++;
+                idx++;
             }
             fprintf(stdout, "]");
         }
@@ -113,6 +126,9 @@ void write_state(struct state *s, struct space *sp)
     fflush(stdout);
 }
 
+//==============================================================================
+//                           phi_harmonic_oscillator
+//==============================================================================
 void phi_harmonic_oscillator(struct state *s, struct space *sp,
                              double x, double y, double z, 
                              double rx, double ry, double rz)
@@ -159,40 +175,189 @@ inline void kxyz(int i, struct space *s, double *x, double *y, double *z)
     *z = (s->dkz * iz);
 }
 
-int main(int argc, char **argv)
+//==============================================================================
+//                                    drift
+//==============================================================================
+void drift(const double dt, const struct space *space, const struct state *state, const struct plans *plans)
 {
     size_t idx;
-    size_t nthreads = 2; //omp_get_num_threads();
+    int32_t i,j,k;
+
+    fftw_execute(plans->psi_f);
+    //#pragma omp parallel for private(j,i,idx)
+    for (k=0; k < space->Nz; k++) { idx = k * space->Nx * space->Ny;
+    for (j=0; j < space->Ny; j++)
+    for (i=0; i < space->Nx; i++)
+    {
+        double k2;
+
+#if 0
+        const int32_t io = (i + (space->Nx>>1))%space->Nx;
+        const int32_t jo = (j + (space->Ny>>1))%space->Ny;
+        const int32_t ko = (k + (space->Nz>>1))%space->Nz;
+#endif
+
+        const int32_t io = i <= (space->Nx>>1) ? i : i-(space->Nx);
+        const int32_t jo = j <= (space->Ny>>1) ? j : j-(space->Ny);
+        const int32_t ko = k <= (space->Nz>>1) ? k : k-(space->Nz);
+
+
+        //fprintf(stderr, "%ld %i %i %i\n", idx, io, jo, ko);
+
+
+        k2 = pow(io*space->dkx,2)
+           + pow(jo*space->dky,2)
+           + pow(ko*space->dkz,2);
+
+        k2 /= 2;
+
+        const double c = cos(k2 * dt);
+        const double s = sin(k2 * dt);
+        const double p0 = state->psi[idx][0] / sqrt(state->N);
+        const double p1 = state->psi[idx][1] / sqrt(state->N);
+
+        state->psi[idx][0] = c*p0 - s*p1;
+        state->psi[idx][1] = c*p1 + s*p0;
+
+        idx++;
+    }}
+
+    fftw_execute(plans->psi_b);
+    #pragma omp parallel for 
+    for (idx=0; idx < state->N; idx++)
+    {
+        state->psi[idx][0] /= sqrt(state->N);
+        state->psi[idx][1] /= sqrt(state->N);
+    }
+}
+
+//==============================================================================
+//                                     kick
+//==============================================================================
+void kick(const double dt, const struct space *space, const struct state *state, const struct plans *plans)
+{
+    size_t idx;
+
+    #pragma omp parallel for 
+    for (idx=0; idx < state->N; idx++)
+    {
+        double p0 = state->psi[idx][0];
+        double p1 = state->psi[idx][1];
+        double c = cos(state->phi[idx][0] * dt);
+        double s = sin(state->phi[idx][0] * dt);
+
+        state->psi[idx][0] = c*p0 - s*p1;
+        state->psi[idx][1] = c*p1 + s*p0;
+
+        //fprintf(stderr, "p0/p1  %f %f -> %f %f / %f\n", p0, p1, state.psi[i][0], state.psi[i][1], state.phi[i][0]*dt);
+    }
+}
+
+//==============================================================================
+//                                   gravity
+//==============================================================================
+void gravity(const struct space *space, const struct state *state, const struct plans *plans)
+{
+    size_t idx;
+    int32_t i,j,k;
+
+    double prob_tot = 0;
+    #pragma omp parallel for reduction(+:prob_tot)
+    for (idx=0; idx < state->N; idx++)
+    {
+        state->rho[idx][0] = pow(state->psi[idx][0],2) + pow(state->psi[idx][1],2);
+        state->rho[idx][1] = 0;
+
+        state->phi[idx][0] = 0;
+        state->phi[idx][1] = 0;
+        prob_tot += state->rho[idx][0];
+    }
+
+#if 0
+    if (step % 100 == 0)
+    {
+        capture_image(&space, &state, &fb);
+        write_image("frames/becon.%05i.phi.jpg", step, &fb);
+    }
+#endif
+
+#if 1
+    //Log("Total Probability is %f\n", prob_tot);
+    fftw_execute(plans->rho_f);
+    #pragma omp parallel for private(j,i,idx)
+    for (k=0; k < space->Nz; k++) { idx = k * space->Nx * space->Ny;
+    for (j=0; j < space->Ny; j++)
+    for (i=0; i < space->Nx; i++)
+    {
+        double k2;
+
+        const int32_t io = i <= (space->Nx>>1) ? i : i-(space->Nx);
+        const int32_t jo = j <= (space->Ny>>1) ? j : j-(space->Ny);
+        const int32_t ko = k <= (space->Nz>>1) ? k : k-(space->Nz);
+
+        k2 = pow(io*space->dkx,2)
+           + pow(jo*space->dky,2)
+           + pow(ko*space->dkz,2);
+
+        if (fabs(k2) > 1e-12)
+        {
+            state->phi[idx][0] = state->rho[idx][0] / k2 / sqrt(state->N);
+            //fprintf(stderr, "phi %g\n", state->phi[idx][0]);
+            state->phi[idx][1] = 0;
+        }
+        else
+        {
+            state->phi[idx][0] = 0;
+            state->phi[idx][1] = 0;
+        }
+
+
+        idx++;
+    }}
+    fftw_execute(plans->phi_b);
+    #pragma omp parallel for 
+    for (idx=0; idx < state->N; idx++)
+    {
+        state->phi[idx][0] /= sqrt(state->N);
+        state->phi[idx][1] /= sqrt(state->N);
+    }
+#endif
+}
+
+//==============================================================================
+//                                     main
+//==============================================================================
+int main(int argc, char **argv)
+{
+    size_t nthreads = 4; //omp_get_num_threads();
     struct state state;
     struct space space;
     struct plans plans;
     struct options opts;
     struct frame_buffer fb;
 
-    int32_t i,j,k;
-
-    //double dt = 1e-8;
-    //double tmax = dt * 0; //1.0001;; //1.0;
-    //double tmax = dt * 10000; //1.0001;; //1.0;
     double t;
     int step;
 
     opts.with_gravity = 1;
-    opts.dt = 1e-5;
-    opts.tmax = opts.dt * 1000;
+    opts.dt = 0.1 * 0.861522;
+    opts.tmax = opts.dt * 10000;
 
-    if (alloc_grafic("graficICs/level0", &state, &space) != 0)
+#if 1
+    if (alloc_grafic("graficICs/64/level0", &state, &space) != 0)
     {
         Log("Failed to read input.\n");
         exit(1);
     }
+#endif
+
+    //ic_init_test1D(&state, &space);
 
     alloc_frame_buffer(&fb, imin(256, space.Nx), imin(256, space.Ny));
 
     fftw_init_threads();
     fftw_plan_with_nthreads(nthreads);
 
-    //ic_init_test1D(&state, &space);
 
     Log("Creating plans...\n");
 #define PLAN(sp, st, var, dir) \
@@ -205,131 +370,56 @@ int main(int argc, char **argv)
     plans.phi_b = PLAN(space, state, phi, FFTW_BACKWARD);
     plans.rho_b = PLAN(space, state, rho, FFTW_BACKWARD);
 
-    if (read_grafic("graficICs/level0", &state, &space) != 0)
+#if 1
+    if (read_grafic("graficICs/64/level0", &state, &space) != 0)
     {
         Log("Failed to load input.\n");
         exit(1);
     }
+#endif
 
     //ic_test1D(&state, &space);
 
-    assert((space.Nx & 1) == 0);
-    assert((space.Ny & 1) == 0);
-    assert((space.Nz & 1) == 0);
+    assert(space.Nx == 1 || (space.Nx & 1) == 0);
+    assert(space.Ny == 1 || (space.Ny & 1) == 0);
+    assert(space.Nz == 1 || (space.Nz & 1) == 0);
 
     Log("Running simulation...\n");
 
     //write_state(&state, &space);
 
-    for (t=0, step=0; t < opts.tmax; t += opts.dt, step++)
+    //capture_image(&space, &state, &fb);
+    //write_image("frames/becon.%05i.phi.jpg", 0, &fb);
+
+    capture_image_log(1, 100, cmap_tipsy, &space, &state, &fb);
+    write_image("frames/becon.%05i.rho.jpg", 0, &fb);
+
+    for (t=0, step=1; t < opts.tmax; t = step++ * opts.dt)
     {
         Log("Time %8.4g  Step %i\n", t, step);
 
-        //----------------------------------------------------------------------
-        // Drift
-        //----------------------------------------------------------------------
-        fftw_execute(plans.psi_f);
-        size_t idx = 0;
-        for (k=0; k < space.Nz; k++)
-        for (j=0; j < space.Ny; j++)
-        for (i=0; i < space.Nx; i++)
+        drift(opts.dt/2, &space, &state, &plans);
+
+#if 1
+        if (step % 10 == 0)
         {
-            double k2, x,y,z;
-
-            //kxyz(i, &space, &x,&y,&z);
-            //k2 = x*x + y*y + z*z;
-
-            k2 = pow(((i + (space.Nx>>1))%space.Nx)*space.dkx,2)
-               + pow(((j + (space.Ny>>1))%space.Ny)*space.dky,2)
-               + pow(((k + (space.Nz>>1))%space.Nz)*space.dkz,2);
-
-            k2 /= 2;
-
-            double c = cos(k2 * opts.dt);
-            double s = sin(k2 * opts.dt);
-            double p0 = state.psi[idx][0];
-            double p1 = state.psi[idx][1];
-
-            state.psi[idx][0] = c*p0 - s*p1;
-            state.psi[idx][1] = c*p1 + s*p0;
-
-            idx++;
+            capture_image_log(1, 100, cmap_tipsy, &space, &state, &fb);
+            //capture_image(&space, &state, &fb);
+            write_image("frames/becon.%05i.rho.jpg", step, &fb);
         }
-
-        fftw_execute(plans.psi_b);
-        for (idx=0; idx < state.N; idx++)
-        {
-            state.psi[idx][0] /= state.N;
-            state.psi[idx][1] /= state.N;
-        }
+#endif
 
         if (opts.with_gravity)
         {
-            //----------------------------------------------------------------------
-            // Gravity
-            //----------------------------------------------------------------------
-            double prob_tot = 0;
-            for (idx=0; idx < state.N; idx++)
-            {
-                state.rho[idx][0] = pow(state.psi[idx][0],2) + pow(state.psi[idx][1],2);
-                state.rho[idx][1] = 0;
-
-                state.phi[idx][0] = 0;
-                state.phi[idx][1] = 0;
-                prob_tot += state.rho[idx][0];
-            }
-
-            //Log("Total Probability is %f\n", prob_tot);
-            fftw_execute(plans.rho_f);
-            idx = 0;
-            for (k=0; k < space.Nz; k++)
-            for (j=0; j < space.Ny; j++)
-            for (i=0; i < space.Nx; i++)
-            {
-                double k2, x,y,z;
-
-                //kxyz(i, &space, &x,&y,&z);
-                //k2 = x*x + y*y + z*z;
-
-                k2 = pow(((i + (space.Nx>>1))%space.Nx)*space.dkx,2)
-                   + pow(((j + (space.Ny>>1))%space.Ny)*space.dky,2)
-                   + pow(((k + (space.Nz>>1))%space.Nz)*space.dkz,2);
-
-                if (fabs(k2) > 1e-12)
-                {
-                    state.phi[idx][0] = state.rho[idx][0] / k2;
-                    state.phi[idx][1] = 0;
-                }
-
-                idx++;
-            }
-            fftw_execute(plans.phi_b);
-            for (idx=0; idx < state.N; idx++)
-            {
-                state.phi[idx][0] /= state.N;
-                state.phi[idx][1] /= state.N;
-            }
+            gravity(&space, &state, &plans);
         }
 
-        phi_harmonic_oscillator(&state, &space, 0,0,0, space.xmax/2, 0,0);
+        kick(opts.dt, &space, &state, &plans);
 
-        //----------------------------------------------------------------------
-        // Kick
-        //----------------------------------------------------------------------
-        for (idx=0; idx < state.N; idx++)
-        {
-            double p0 = state.psi[idx][0];
-            double p1 = state.psi[idx][1];
-            double c = cos(state.phi[idx][0] * opts.dt/2.);
-            double s = sin(state.phi[idx][0] * opts.dt/2.);
 
-            state.psi[idx][0] = c*p0 - s*p1;
-            state.psi[idx][1] = c*p1 + s*p0;
+        //phi_harmonic_oscillator(&state, &space, 0,0,0, space.xmax/2, 0,0);
 
-            //fprintf(stderr, "p0/p1  %f %f -> %f %f / %f\n", p0, p1, state.psi[i][0], state.psi[i][1], state.phi[i][0]*dt);
-        }
-
-#if 1
+#if 0
         fftw_execute(plans.rho_b);
         for (idx=0; idx < state.N; idx++)
         {
@@ -338,12 +428,7 @@ int main(int argc, char **argv)
         }
 #endif
 
-        if (step % 10 == 0)
-        {
-            //write_state(&state, &space);
-            capture_image(&space, &state, &fb);
-            write_image("frames/becon.%05i.jpg", step, &fb);
-        }
+        //write_state(&state, &space);
     }
 
     Log("Simulation complete.\n");

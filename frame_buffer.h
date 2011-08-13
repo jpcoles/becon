@@ -9,8 +9,10 @@ struct frame_buffer
 {
     int32_t width, height;
     char samples;
+    size_t size;
 
-    JSAMPROW buf;
+    JSAMPROW img;
+    double *buf;
 };
 
 int alloc_frame_buffer(struct frame_buffer *fb, int32_t width, int32_t height);

@@ -7,11 +7,13 @@ int alloc_frame_buffer(struct frame_buffer *fb, int32_t width, int32_t height)
     fb->samples = 3;
     fb->width  = width;
     fb->height = height;
+    fb->size = width * height;
 
-    fb->buf = malloc(width * height * fb->samples);
-    if (fb->buf == NULL)
-        return 1;
+    fb->buf = malloc(fb->size * sizeof(double));
+    fb->img = malloc(fb->size * fb->samples);
 
+    if (fb->img == NULL) return 1;
+    if (fb->buf == NULL) return 1;
 
     return 0;
 }
@@ -19,7 +21,9 @@ int alloc_frame_buffer(struct frame_buffer *fb, int32_t width, int32_t height)
 int free_frame_buffer(struct frame_buffer *fb)
 {
     assert(fb->buf != NULL);
+    assert(fb->img != NULL);
     free(fb->buf);
+    free(fb->img);
 
     return 0;
 }
@@ -48,7 +52,7 @@ void write_frame_buffer(FILE *outfile, struct frame_buffer *fb)
     row_stride = cinfo.image_width * fb->samples;   /* JSAMPLEs per row in image_buffer */
 
     while (cinfo.next_scanline < cinfo.image_height) {
-        row_pointer[0] = & (fb->buf[(cinfo.image_height-cinfo.next_scanline-1) * row_stride]);
+        row_pointer[0] = & (fb->img[(cinfo.image_height-cinfo.next_scanline-1) * row_stride]);
         jpeg_write_scanlines(&cinfo, row_pointer, 1);
     }
 

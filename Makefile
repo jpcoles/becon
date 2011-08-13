@@ -1,12 +1,12 @@
 FFTW=/opt/fftw/3.2.2/gnu
 CC=gcc
-CFLAGS=-O2 -Wall -g -I$(FFTW)/include 
+CFLAGS=-O2 -Wall -g -I$(FFTW)/include  -fopenmp
 CFLAGS+=-funroll-loops -ftree-vectorize -fno-omit-frame-pointer -fprefetch-loop-arrays -mssse3
-LDFLAGS=-L$(FFTW)/lib -lfftw3_threads -lfftw3 -lm -ljpeg
+LDFLAGS=-L$(FFTW)/lib -lfftw3_threads -lfftw3 -lm -ljpeg -lgomp
 
 all: becon
 
-becon: becon.o io_grafic.o log.o io_image.o frame_buffer.o
+becon: becon.o io_grafic.o log.o io_image.o frame_buffer.o cmap.o
 	$(CC) $(LDFLAGS) -o $@ $^
 
 becon.o: becon.c becon.h
@@ -22,6 +22,9 @@ io_image.o: io_image.c io_image.h
 	$(CC) $(CFLAGS) -c $<
 
 frame_buffer.o: frame_buffer.c frame_buffer.h
+	$(CC) $(CFLAGS) -c $<
+
+cmap.o: cmap.c cmap.h
 	$(CC) $(CFLAGS) -c $<
 
 clean: 

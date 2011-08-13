@@ -1,3 +1,4 @@
+#include <float.h>
 #include <math.h>
 #include <sys/types.h>
 #include <alloca.h>
@@ -55,6 +56,14 @@ int alloc_grafic(const char *dirname, struct state *state, struct space *space)
     space->Nx = hdr.np1;
     space->Ny = hdr.np2;
     space->Nz = hdr.np3;
+
+    space->drx =
+    space->dry =
+    space->drz = hdr.dx;
+
+    space->dkx = fabs(space->drx) != 0 ? 2*M_PI/(space->drx * space->Nx) : 0;
+    space->dky = fabs(space->dry) != 0 ? 2*M_PI/(space->dry * space->Ny) : 0;
+    space->dkz = fabs(space->drz) != 0 ? 2*M_PI/(space->drz * space->Nz) : 0;
 
     state->N = hdr.np1 * hdr.np2 * hdr.np3;
 
@@ -147,6 +156,8 @@ int read_grafic(const char *dirname, struct state *state, struct space *space)
 {
     size_t i;
     int retcode = 0;
+    double rho_max=-DBL_MAX;
+    double rho_min=DBL_MAX;
 
     float *a = malloc(sizeof(*a) * state->N);
     if (a == NULL) 
@@ -163,7 +174,9 @@ int read_grafic(const char *dirname, struct state *state, struct space *space)
 
     for (i=0; i < state->N; i++)
     {
-	a[i] += 1.0;
+        a[i] += 1.0;
+
+    //a[i] *= 100;
 
         if (a[i] < 0 || (a[i] > 0 && !isnormal(a[i])))
         {
@@ -179,7 +192,14 @@ int read_grafic(const char *dirname, struct state *state, struct space *space)
 
         state->rho[i][0] = a[i];
         state->rho[i][1] = 0;
+
+        if (a[i] > rho_max) rho_max = a[i];
+        if (a[i] < rho_min) rho_min = a[i];
     }
+
+    Log("rho_min is %f\n", rho_min);
+    Log("rho_max is %f\n", rho_max);
+    Log("1/sqrt(rho_max) is %f\n", 1/sqrt(rho_max));
 
 
 cleanup:
