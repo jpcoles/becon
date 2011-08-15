@@ -178,7 +178,11 @@ int read_grafic(const char *dirname, struct state *state, struct space *space)
 
     //a[i] *= 100;
 
-        if (a[i] < 0 || (a[i] > 0 && !isnormal(a[i])))
+        if (a[i] < 0
+#ifdef isnormal
+		 || (a[i] > 0 && !isnormal(a[i]))
+#endif
+		)
         {
             Log("Bad input value %g\n", a[i]);
             retcode = 3;

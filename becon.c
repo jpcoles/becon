@@ -183,27 +183,27 @@ void drift(const double dt, const struct space *space, const struct state *state
     size_t idx;
     int32_t i,j,k;
 
+#if 0
+    for (idx=0; idx < state->N; idx++)
+    {
+        //assert(fabs(state->psi[idx][1]) < 1e-12);
+        assert(fabs(state->psi[idx][0] - sqrt(state->rho[idx][0])) < 1e-12);
+    }
+#endif
+
     fftw_execute(plans->psi_f);
-    //#pragma omp parallel for private(j,i,idx)
+    #pragma omp parallel for private(j,i,idx)
     for (k=0; k < space->Nz; k++) { idx = k * space->Nx * space->Ny;
     for (j=0; j < space->Ny; j++)
     for (i=0; i < space->Nx; i++)
     {
         double k2;
 
-#if 0
-        const int32_t io = (i + (space->Nx>>1))%space->Nx;
-        const int32_t jo = (j + (space->Ny>>1))%space->Ny;
-        const int32_t ko = (k + (space->Nz>>1))%space->Nz;
-#endif
-
-        const int32_t io = i <= (space->Nx>>1) ? i : i-(space->Nx);
-        const int32_t jo = j <= (space->Ny>>1) ? j : j-(space->Ny);
-        const int32_t ko = k <= (space->Nz>>1) ? k : k-(space->Nz);
-
+        const int32_t io = i - space->Nx*(i > (space->Nx>>1));
+        const int32_t jo = j - space->Ny*(j > (space->Ny>>1));
+        const int32_t ko = k - space->Nz*(k > (space->Nz>>1));
 
         //fprintf(stderr, "%ld %i %i %i\n", idx, io, jo, ko);
-
 
         k2 = pow(io*space->dkx,2)
            + pow(jo*space->dky,2)
@@ -211,13 +211,18 @@ void drift(const double dt, const struct space *space, const struct state *state
 
         k2 /= 2;
 
-        const double c = cos(k2 * dt);
-        const double s = sin(k2 * dt);
-        const double p0 = state->psi[idx][0] / sqrt(state->N);
-        const double p1 = state->psi[idx][1] / sqrt(state->N);
+        //fprintf(stderr, "%ld %f\n", idx, state->psi[idx][1]);
+
+        const long double c = cosl(-k2 * dt);
+        const long double s = sinl(-k2 * dt);
+        const long double p0 = state->psi[idx][0];// / sqrt(state->N);
+        const long double p1 = state->psi[idx][1];// / sqrt(state->N);
 
         state->psi[idx][0] = c*p0 - s*p1;
         state->psi[idx][1] = c*p1 + s*p0;
+
+        //fprintf(stderr, "%.20Lf %.20Lf\n", p0*p0+p1*p1, powl(state->psi[idx][0],2) + powl(state->psi[idx][1],2));
+        //assert(fdim(p0*p0+p1*p1, pow(state->psi[idx][0],2) + pow(state->psi[idx][1],2)) < 1e-12);
 
         idx++;
     }}
@@ -226,9 +231,18 @@ void drift(const double dt, const struct space *space, const struct state *state
     #pragma omp parallel for 
     for (idx=0; idx < state->N; idx++)
     {
-        state->psi[idx][0] /= sqrt(state->N);
-        state->psi[idx][1] /= sqrt(state->N);
+        state->psi[idx][0] /= (state->N);
+        state->psi[idx][1] /= (state->N);
+
+        //double mag2 = pow(state->psi[idx][0],2) + pow(state->psi[idx][1],2);
+        //fprintf(stderr, "%ld %.20f %.20f\n", idx, mag2, state->rho[idx][0]);
+        //assert(fabs(state->psi[idx][1]) < 1e-12);
+        
+        //assert(fdim(mag2, state->rho[idx][0]) < 1e-8);
     }
+
+    idx=0;
+    //fprintf(stderr, "%f %f\n", state->psi[0][0], state->rho[0][0]);
 }
 
 //==============================================================================
@@ -301,7 +315,7 @@ void gravity(const struct space *space, const struct state *state, const struct 
 
         if (fabs(k2) > 1e-12)
         {
-            state->phi[idx][0] = state->rho[idx][0] / k2 / sqrt(state->N);
+            state->phi[idx][0] = state->rho[idx][0] / k2; // / (state->N);
             //fprintf(stderr, "phi %g\n", state->phi[idx][0]);
             state->phi[idx][1] = 0;
         }
@@ -318,8 +332,8 @@ void gravity(const struct space *space, const struct state *state, const struct 
     #pragma omp parallel for 
     for (idx=0; idx < state->N; idx++)
     {
-        state->phi[idx][0] /= sqrt(state->N);
-        state->phi[idx][1] /= sqrt(state->N);
+        state->phi[idx][0] /= (state->N);
+        state->phi[idx][1] /= (state->N);
     }
 #endif
 }
@@ -329,7 +343,7 @@ void gravity(const struct space *space, const struct state *state, const struct 
 //==============================================================================
 int main(int argc, char **argv)
 {
-    size_t nthreads = 4; //omp_get_num_threads();
+    size_t nthreads = 6; //omp_get_num_threads();
     struct state state;
     struct space space;
     struct plans plans;
@@ -340,11 +354,11 @@ int main(int argc, char **argv)
     int step;
 
     opts.with_gravity = 1;
-    opts.dt = 0.1 * 0.861522;
+    opts.dt = 0.01 * 0.861522;
     opts.tmax = opts.dt * 10000;
 
 #if 1
-    if (alloc_grafic("graficICs/64/level0", &state, &space) != 0)
+    if (alloc_grafic("graficICs/256/level0", &state, &space) != 0)
     {
         Log("Failed to read input.\n");
         exit(1);
@@ -361,7 +375,7 @@ int main(int argc, char **argv)
 
     Log("Creating plans...\n");
 #define PLAN(sp, st, var, dir) \
-    fftw_plan_dft_3d(sp.Nx, sp.Ny, sp.Nz, st. var, st. var, dir, FFTW_ESTIMATE)
+    fftw_plan_dft_3d(sp.Nx, sp.Ny, sp.Nz, st. var, st. var, dir, FFTW_MEASURE)
 
     plans.psi_f = PLAN(space, state, psi, FFTW_FORWARD);
     plans.phi_f = PLAN(space, state, phi, FFTW_FORWARD);
@@ -371,7 +385,7 @@ int main(int argc, char **argv)
     plans.rho_b = PLAN(space, state, rho, FFTW_BACKWARD);
 
 #if 1
-    if (read_grafic("graficICs/64/level0", &state, &space) != 0)
+    if (read_grafic("graficICs/256/level0", &state, &space) != 0)
     {
         Log("Failed to load input.\n");
         exit(1);
@@ -391,8 +405,8 @@ int main(int argc, char **argv)
     //capture_image(&space, &state, &fb);
     //write_image("frames/becon.%05i.phi.jpg", 0, &fb);
 
-    capture_image_log(1, 100, cmap_tipsy, &space, &state, &fb);
-    write_image("frames/becon.%05i.rho.jpg", 0, &fb);
+    //capture_image_log(1, 100, cmap_tipsy, &space, &state, &fb);
+    //write_image("frames/becon.%05i.rho.jpg", 0, &fb);
 
     for (t=0, step=1; t < opts.tmax; t = step++ * opts.dt)
     {
