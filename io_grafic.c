@@ -22,7 +22,12 @@ struct header
 
 static int read_grafic_array(const char *dirname, const char *fname, float *a, size_t np1, size_t np2, size_t np3);
 
-int alloc_grafic(const char *dirname, struct state *state, struct space *space)
+#define UNIT_LENGTH (56.36041080) // [m]
+#define PC  (3.08568025e16) // [m]
+#define KPC (1e3 * PC)
+#define MPC (1e3 * KPC)
+
+int alloc_grafic(const char *dirname, struct env *env)
 {
     FILE *fp;
     char *fname = "/ic_deltab";
@@ -53,23 +58,30 @@ int alloc_grafic(const char *dirname, struct state *state, struct space *space)
 
     fclose(fp);
 
-    space->Nx = hdr.np1;
-    space->Ny = hdr.np2;
-    space->Nz = hdr.np3;
+    env->cosmo.a_start = hdr.astart;
+    env->cosmo.omega_m = hdr.omegam;
+    env->cosmo.omega_v = hdr.omegav;
+    env->cosmo.H0      = hdr.h0;
 
-    space->drx =
-    space->dry =
-    space->drz = hdr.dx;
+    env->cosmo.omega_r = 0;
+    env->cosmo.omega_k = 1 - (env->cosmo.omega_m + env->cosmo.omega_v + env->cosmo.omega_r);
 
-    space->dkx = fabs(space->drx) != 0 ? 2*M_PI/(space->drx * space->Nx) : 0;
-    space->dky = fabs(space->dry) != 0 ? 2*M_PI/(space->dry * space->Ny) : 0;
-    space->dkz = fabs(space->drz) != 0 ? 2*M_PI/(space->drz * space->Nz) : 0;
 
-    state->N = hdr.np1 * hdr.np2 * hdr.np3;
+    env->space.Nx = hdr.np1;
+    env->space.Ny = hdr.np2;
+    env->space.Nz = hdr.np3;
 
-    state->psi = (fftw_complex*) fftw_malloc(sizeof(*state->psi) * state->N);
-    state->phi = (fftw_complex*) fftw_malloc(sizeof(*state->phi) * state->N);
-    state->rho = (fftw_complex*) fftw_malloc(sizeof(*state->rho) * state->N);
+    env->space.dx = 1; //hdr.dx;
+
+    env->space.dkx = fabs(env->space.dx) != 0 ? 2*M_PI/(env->space.dx * env->space.Nx) : 0;
+    env->space.dky = fabs(env->space.dx) != 0 ? 2*M_PI/(env->space.dx * env->space.Ny) : 0;
+    env->space.dkz = fabs(env->space.dx) != 0 ? 2*M_PI/(env->space.dx * env->space.Nz) : 0;
+
+    env->state.N = hdr.np1 * hdr.np2 * hdr.np3;
+
+    env->state.psi = (fftw_complex*) fftw_malloc(sizeof(*env->state.psi) * env->state.N);
+    env->state.phi = (fftw_complex*) fftw_malloc(sizeof(*env->state.phi) * env->state.N);
+    env->state.rho = (fftw_complex*) fftw_malloc(sizeof(*env->state.rho) * env->state.N);
 
     return 0;
 }
@@ -152,53 +164,54 @@ cleanup:
     return retcode;
 }
 
-int read_grafic(const char *dirname, struct state *state, struct space *space)
+int read_grafic(const char *dirname, struct env *env)
 {
     size_t i;
     int retcode = 0;
     double rho_max=-DBL_MAX;
     double rho_min=DBL_MAX;
 
-    float *a = malloc(sizeof(*a) * state->N);
-    if (a == NULL) 
+    float *arr = malloc(sizeof(*arr) * env->state.N);
+    if (arr == NULL) 
     {
         retcode = 1;
         goto cleanup;
     }
 
-    if (read_grafic_array(dirname, "/ic_deltab", a, space->Nx, space->Ny, space->Nz))
+    if (read_grafic_array(dirname, "/ic_deltab", arr, env->space.Nx, env->space.Ny, env->space.Nz))
     {
         retcode = 2;
         goto cleanup;
     }
 
-    for (i=0; i < state->N; i++)
+    for (i=0; i < env->state.N; i++)
     {
-        a[i] += 1.0;
+        arr[i] += 1.0;
+        arr[i] *= env->cosmo.rho_crit;
 
     //a[i] *= 100;
 
-        if (a[i] < 0
+        if (arr[i] < 0
 #ifdef isnormal
-		 || (a[i] > 0 && !isnormal(a[i]))
+		 || (arr[i] > 0 && !isnormal(arr[i]))
 #endif
 		)
         {
-            Log("Bad input value %g\n", a[i]);
+            Log("Bad input value %g\n", arr[i]);
             retcode = 3;
             goto cleanup;
         }
-        state->phi[i][0] = 0;
-        state->phi[i][1] = 0;
+        env->state.phi[i][0] = 0;
+        env->state.phi[i][1] = 0;
 
-        state->psi[i][0] = sqrt(a[i]);
-        state->psi[i][1] = 0;
+        env->state.psi[i][0] = sqrt(arr[i]);
+        env->state.psi[i][1] = 0;
 
-        state->rho[i][0] = a[i];
-        state->rho[i][1] = 0;
+        env->state.rho[i][0] = arr[i];
+        env->state.rho[i][1] = 0;
 
-        if (a[i] > rho_max) rho_max = a[i];
-        if (a[i] < rho_min) rho_min = a[i];
+        if (arr[i] > rho_max) rho_max = arr[i];
+        if (arr[i] < rho_min) rho_min = arr[i];
     }
 
     Log("rho_min is %f\n", rho_min);
@@ -208,7 +221,7 @@ int read_grafic(const char *dirname, struct state *state, struct space *space)
 
 cleanup:
 
-    free(a);
+    free(arr);
 
     return retcode;
 }

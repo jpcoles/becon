@@ -7,7 +7,7 @@ LDFLAGS=-lpthread -lfftw3_threads $(FFTW_LDFLAGS) -ljpeg -lgomp
 
 all: becon
 
-becon: becon.o io_grafic.o log.o io_image.o frame_buffer.o cmap.o
+becon: becon.o io_grafic.o log.o io_image.o frame_buffer.o cmap.o io_arrays.o io_tipsy.o
 	$(CC) -o $@ $^ $(LDFLAGS) 
 
 becon.o: becon.c becon.h
@@ -26,6 +26,12 @@ frame_buffer.o: frame_buffer.c frame_buffer.h
 	$(CC) $(CFLAGS) -c $<
 
 cmap.o: cmap.c cmap.h
+	$(CC) $(CFLAGS) -c $<
+
+io_arrays.o: io_arrays.c io_arrays.h
+	$(CC) $(CFLAGS) -c $<
+
+io_tipsy.o: io_tipsy.c io_tipsy.h
 	$(CC) $(CFLAGS) -c $<
 
 clean: 

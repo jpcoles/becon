@@ -1,3 +1,4 @@
+#include <float.h>
 #include <assert.h>
 #include <math.h>
 #include <stdlib.h>
@@ -7,6 +8,8 @@
 #include "becon.h"
 #include "log.h"
 #include "io_grafic.h"
+#include "io_arrays.h"
+#include "io_tipsy.h"
 #include "io_image.h"
 #include "frame_buffer.h"
 #include "cmap.h"
@@ -23,105 +26,135 @@ inline int imax(int a, int b)
     return b;
 }
 
+inline double MIN(double a, double b)
+{
+    if (a < b) return a;
+    return b;
+}
+
+inline double MAX(double a, double b)
+{
+    if (a > b) return a;
+    return b;
+}
+
+inline double cmag2(fftw_complex a)
+{
+    return pow(a[0],2) + pow(a[1],2);
+}
+
 
 //==============================================================================
 //                                ic_init_test1D
 //==============================================================================
-void ic_init_test1D(struct state *state, struct space *space)
+void ic_init_test1D(struct env *env)
 {
     Log("Preparing test1D initial conditions...\n");
 
-    space->xmin = -1.5;
-    space->xmax = 1.5;
-    space->ymin = 0.0;
-    space->ymax = 0.0;
-    space->zmin = 0.0;
-    space->zmax = 0.0;
+    env->cosmo.a_start = 1;
+    env->cosmo.H0 = 1;
+    env->cosmo.omega_m = 0.279;
+    env->cosmo.omega_v = 0.721;
+    env->cosmo.omega_r = 0;
+    env->cosmo.omega_k = 1 - (env->cosmo.omega_m + env->cosmo.omega_v + env->cosmo.omega_r);
+    env->cosmo.rho_crit = 1;
 
-    space->Nx = 1 << 12;
-    space->Ny = 1;
-    space->Nz = 1;
+    env->space.Nx = 1 << 8;
+    env->space.Ny = 1;
+    env->space.Nz = 1;
 
-    space->drx = (space->xmax-space->xmin) / space->Nx;
-    space->dry = (space->ymax-space->ymin) / space->Ny;
-    space->drz = (space->zmax-space->zmin) / space->Nz;
+    env->space.dx = 1; //(env->space.xmax-env->space.xmin) / env->space.Nx;
 
-    space->dkx = fabs(space->drx) != 0 ? 2*M_PI/(space->drx * space->Nx) : 0;
-    space->dky = fabs(space->dry) != 0 ? 2*M_PI/(space->dry * space->Ny) : 0;
-    space->dkz = fabs(space->drz) != 0 ? 2*M_PI/(space->drz * space->Nz) : 0;
+    env->space.xmin = -env->space.dx * env->space.Nx/2;
+    env->space.xmax = -env->space.xmax;
+    env->space.ymin = 0.0;
+    env->space.ymax = 0.0;
+    env->space.zmin = 0.0;
+    env->space.zmax = 0.0;
+
+
+
+    env->space.dkx = fabs(env->space.dx) != 0 ? 2*M_PI/(env->space.dx * env->space.Nx) : 0;
+    env->space.dky = fabs(env->space.dx) != 0 ? 2*M_PI/(env->space.dx * env->space.Ny) : 0;
+    env->space.dkz = fabs(env->space.dx) != 0 ? 2*M_PI/(env->space.dx * env->space.Nz) : 0;
 
     //Log("dt: %g\n", dt);
-    Log("    dx: %g %g %g\n", space->drx, space->dry, space->drz);
-    Log("    dk: %g %g %g\n", space->dkx, space->dky, space->dkz);
+    Log("    dx: %g\n", env->space.dx);
+    Log("    dk: %g %g %g\n", env->space.dkx, env->space.dky, env->space.dkz);
 
-    size_t N = space->Nx * space->Ny * space->Nz;
+    size_t N = env->space.Nx * env->space.Ny * env->space.Nz;
 
-    state->N = N;
+    env->state.N = N;
 
     Log("    %ld grid cells.\n", N);
 
-    state->psi = (fftw_complex*) fftw_malloc(sizeof(*state->psi) * N);
-    state->phi = (fftw_complex*) fftw_malloc(sizeof(*state->phi) * N);
-    state->rho = (fftw_complex*) fftw_malloc(sizeof(*state->rho) * N);
+    env->state.psi = (fftw_complex*) fftw_malloc(sizeof(*env->state.psi) * N);
+    env->state.phi = (fftw_complex*) fftw_malloc(sizeof(*env->state.phi) * N);
+    env->state.rho = (fftw_complex*) fftw_malloc(sizeof(*env->state.rho) * N);
 }
 
 //==============================================================================
 //                                  ic_test1D
 //==============================================================================
-void ic_test1D(struct state *s, struct space *sp)
+void ic_test1D(struct env *env)
 {
     int32_t x;
 
     Log("Creating test1D initial conditions...\n");
 
-    for (x=0; x < sp->Nx; x++)
+    for (x=0; x < env->space.Nx; x++)
     {
-        s->psi[x][0] = exp(-1 * pow(sp->xmin + x*sp->drx, 2));
+        double rho = env->cosmo.rho_crit * exp(-1 * pow(env->space.xmin + x*env->space.dx,2) / pow(env->space.xmax-env->space.xmin,2));
+
+        if (x < env->space.Nx/8 || x > env->space.Nx - (env->space.Nx / 8))
+            rho = 0;
+
+        env->state.psi[x][0] = sqrt(rho);
         //fprintf(stderr, "%f\n", s->psi[x][0]);
 
         //s->psi[x][0] = cos(2*M_PI * x/sp->Nx);
         //s->psi[x][0] = 1e-5 * cos(2*M_PI * x/L);
-        s->psi[x][1] = 0; //sin(2*M_PI * x/L);
+        env->state.psi[x][1] = 0; //sin(2*M_PI * x/L);
 
-        s->phi[x][0] = 0;
-        s->phi[x][1] = 0;
+        env->state.phi[x][0] = 0;
+        env->state.phi[x][1] = 0;
 
-        s->rho[x][0] = 0;
-        s->rho[x][1] = 0;
+        env->state.rho[x][0] = rho;
+        env->state.rho[x][1] = 0;
     }
 }
 
 //==============================================================================
 //                                 write_state
 //==============================================================================
-void write_state(struct state *s, struct space *sp)
+void write_state(struct env *env)
 {
     size_t idx=0;
     int i,j,k;
 
     i=0;
-    if (sp->Nz > 1) fprintf(stdout, "[");
-    for (k=0; k < sp->Nz; k++)
+    if (env->space.Nz > 1) fprintf(stdout, "[");
+    for (k=0; k < env->space.Nz; k++)
     {
         if (k > 0) fprintf(stdout, ",");
-        if (sp->Ny > 1) fprintf(stdout, "[");
-        for (j=0; j < sp->Ny; j++)
+        if (env->space.Ny > 1) fprintf(stdout, "[");
+        for (j=0; j < env->space.Ny; j++)
         {
             if (j > 0) fprintf(stdout, ",");
             fprintf(stdout, "[");
-            for (i=0; i < sp->Nx; i++)
+            for (i=0; i < env->space.Nx; i++)
             {
                 if (i > 0) fprintf(stdout, ", ");
                 //fprintf(stdout, "%.3g+%.3gj", s->phi[idx][0], s->phi[idx][1]);
-                fprintf(stdout, "%.3g+%.3gj", s->psi[idx][0], s->psi[idx][1]);
+                fprintf(stdout, "%.5g+%.5gj", env->state.psi[idx][0], env->state.psi[idx][1]);
                 //fprintf(stdout, "%.3g+%.3gj", s->rho[idx][0], s->rho[idx][1]);
                 idx++;
             }
             fprintf(stdout, "]");
         }
-        if (sp->Ny > 1) fprintf(stdout, "]");
+        if (env->space.Ny > 1) fprintf(stdout, "]");
     }
-    if (sp->Nz > 1) fprintf(stdout, "]");
+    if (env->space.Nz > 1) fprintf(stdout, "]");
     fprintf(stdout, "\n");
     fflush(stdout);
 }
@@ -140,9 +173,9 @@ void phi_harmonic_oscillator(struct state *s, struct space *sp,
     for (j=0; j < sp->Ny; j++)
     for (i=0; i < sp->Nx; i++)
     {
-        double x0 = i*sp->drx + sp->xmin;
-        double y0 = j*sp->dry + sp->ymin;
-        double z0 = k*sp->drz + sp->zmin;
+        double x0 = i*sp->dx + sp->xmin;
+        double y0 = j*sp->dx + sp->ymin;
+        double z0 = k*sp->dx + sp->zmin;
 
         //s->phi[idx][0] = 1000*pow(x0-x, 2);
 
@@ -178,90 +211,102 @@ inline void kxyz(int i, struct space *s, double *x, double *y, double *z)
 //==============================================================================
 //                                    drift
 //==============================================================================
-void drift(const double dt, const struct space *space, const struct state *state, const struct plans *plans)
+void drift(const double dt, struct env * const env, const struct plans *plans)
 {
     size_t idx;
     int32_t i,j,k;
 
 #if 0
-    for (idx=0; idx < state->N; idx++)
+    for (idx=0; idx < env->state.N; idx++)
     {
-        //assert(fabs(state->psi[idx][1]) < 1e-12);
-        assert(fabs(state->psi[idx][0] - sqrt(state->rho[idx][0])) < 1e-12);
+        //assert(fabs(env->state.psi[idx][1]) < 1e-12);
+        assert(fabs(env->state.psi[idx][0] - sqrt(env->state.rho[idx][0])) < 1e-12);
     }
 #endif
 
     fftw_execute(plans->psi_f);
     #pragma omp parallel for private(j,i,idx)
-    for (k=0; k < space->Nz; k++) { idx = k * space->Nx * space->Ny;
-    for (j=0; j < space->Ny; j++)
-    for (i=0; i < space->Nx; i++)
+    for (k=0; k < env->space.Nz; k++) { idx = k * env->space.Nx * env->space.Ny;
+    for (j=0; j < env->space.Ny; j++)
+    for (i=0; i < env->space.Nx; i++)
     {
         double k2;
 
-        const int32_t io = i - space->Nx*(i > (space->Nx>>1));
-        const int32_t jo = j - space->Ny*(j > (space->Ny>>1));
-        const int32_t ko = k - space->Nz*(k > (space->Nz>>1));
+        const int32_t io = i - env->space.Nx*(i > (env->space.Nx>>1));
+        const int32_t jo = j - env->space.Ny*(j > (env->space.Ny>>1));
+        const int32_t ko = k - env->space.Nz*(k > (env->space.Nz>>1));
 
         //fprintf(stderr, "%ld %i %i %i\n", idx, io, jo, ko);
 
-        k2 = pow(io*space->dkx,2)
-           + pow(jo*space->dky,2)
-           + pow(ko*space->dkz,2);
+        k2 = pow(io*env->space.dkx,2)
+           + pow(jo*env->space.dky,2)
+           + pow(ko*env->space.dkz,2);
 
         k2 /= 2;
 
-        //fprintf(stderr, "%ld %f\n", idx, state->psi[idx][1]);
+        //fprintf(stderr, "%ld %f\n", idx, env->state.psi[idx][1]);
 
-        const long double c = cosl(-k2 * dt);
-        const long double s = sinl(-k2 * dt);
-        const long double p0 = state->psi[idx][0];// / sqrt(state->N);
-        const long double p1 = state->psi[idx][1];// / sqrt(state->N);
+        const long double c = cosl(-env->cosmo.h_m * k2 * dt);
+        const long double s = sinl(-env->cosmo.h_m * k2 * dt);
+        const long double p0 = env->state.psi[idx][0] / sqrt(env->state.N);
+        const long double p1 = env->state.psi[idx][1] / sqrt(env->state.N);
 
-        state->psi[idx][0] = c*p0 - s*p1;
-        state->psi[idx][1] = c*p1 + s*p0;
+        env->state.psi[idx][0] = c*p0 - s*p1;
+        env->state.psi[idx][1] = c*p1 + s*p0;
 
-        //fprintf(stderr, "%.20Lf %.20Lf\n", p0*p0+p1*p1, powl(state->psi[idx][0],2) + powl(state->psi[idx][1],2));
-        //assert(fdim(p0*p0+p1*p1, pow(state->psi[idx][0],2) + pow(state->psi[idx][1],2)) < 1e-12);
+        //fprintf(stderr, "%.20Lf %.20Lf\n", p0*p0+p1*p1, powl(env->state.psi[idx][0],2) + powl(env->state.psi[idx][1],2));
+        //assert(fdim(p0*p0+p1*p1, pow(env->state.psi[idx][0],2) + pow(env->state.psi[idx][1],2)) < 1e-12);
 
         idx++;
     }}
 
+    //write_state(env);
+
+    env->rho_max = 0;
+    env->rho_min = FLT_MAX;
     fftw_execute(plans->psi_b);
     #pragma omp parallel for 
-    for (idx=0; idx < state->N; idx++)
+    for (idx=0; idx < env->state.N; idx++)
     {
-        state->psi[idx][0] /= (state->N);
-        state->psi[idx][1] /= (state->N);
+        env->state.psi[idx][0] /= sqrt(env->state.N);
+        env->state.psi[idx][1] /= sqrt(env->state.N);
 
-        //double mag2 = pow(state->psi[idx][0],2) + pow(state->psi[idx][1],2);
-        //fprintf(stderr, "%ld %.20f %.20f\n", idx, mag2, state->rho[idx][0]);
-        //assert(fabs(state->psi[idx][1]) < 1e-12);
+        //double mag2 = pow(env->state.psi[idx][0],2) + pow(env->state.psi[idx][1],2);
+        //fprintf(stderr, "%ld %.20f %.20f\n", idx, mag2, env->state.rho[idx][0]);
+        //assert(fabs(env->state.psi[idx][1]) < 1e-12);
         
-        //assert(fdim(mag2, state->rho[idx][0]) < 1e-8);
+        //assert(fdim(mag2, env->state.rho[idx][0]) < 1e-8);
+
+        double q = pow(env->state.psi[idx][0],2) + pow(env->state.psi[idx][1],2);
+
+
+        env->rho_max = MAX(env->rho_max, q);
+        env->rho_min = MIN(env->rho_min, q);
+
     }
 
     idx=0;
-    //fprintf(stderr, "%f %f\n", state->psi[0][0], state->rho[0][0]);
+    //fprintf(stderr, "%f %f\n", env->state.psi[0][0], env->state.rho[0][0]);
 }
 
 //==============================================================================
 //                                     kick
 //==============================================================================
-void kick(const double dt, const struct space *space, const struct state *state, const struct plans *plans)
+void kick(const double dt, const struct env *env)
 {
     size_t idx;
 
     #pragma omp parallel for 
-    for (idx=0; idx < state->N; idx++)
+    for (idx=0; idx < env->state.N; idx++)
     {
-        double p0 = state->psi[idx][0];
-        double p1 = state->psi[idx][1];
-        double c = cos(state->phi[idx][0] * dt);
-        double s = sin(state->phi[idx][0] * dt);
+        const long double p0  = env->state.psi[idx][0];
+        const long double p1  = env->state.psi[idx][1];
+        const long double phi = env->state.phi[idx][0];
+        const long double c = cosl(-phi * dt / env->cosmo.h);
+        const long double s = sinl(-phi * dt / env->cosmo.h);
 
-        state->psi[idx][0] = c*p0 - s*p1;
-        state->psi[idx][1] = c*p1 + s*p0;
+        env->state.psi[idx][0] = c*p0 - s*p1;
+        env->state.psi[idx][1] = c*p1 + s*p0;
 
         //fprintf(stderr, "p0/p1  %f %f -> %f %f / %f\n", p0, p1, state.psi[i][0], state.psi[i][1], state.phi[i][0]*dt);
     }
@@ -270,21 +315,21 @@ void kick(const double dt, const struct space *space, const struct state *state,
 //==============================================================================
 //                                   gravity
 //==============================================================================
-void gravity(const struct space *space, const struct state *state, const struct plans *plans)
+void gravity(const struct env *env, const struct plans *plans)
 {
     size_t idx;
     int32_t i,j,k;
 
     double prob_tot = 0;
     #pragma omp parallel for reduction(+:prob_tot)
-    for (idx=0; idx < state->N; idx++)
+    for (idx=0; idx < env->state.N; idx++)
     {
-        state->rho[idx][0] = pow(state->psi[idx][0],2) + pow(state->psi[idx][1],2);
-        state->rho[idx][1] = 0;
+        env->state.rho[idx][0] = cmag2(env->state.psi[idx]);
+        env->state.rho[idx][1] = 0;
 
-        state->phi[idx][0] = 0;
-        state->phi[idx][1] = 0;
-        prob_tot += state->rho[idx][0];
+        env->state.phi[idx][0] = 0;
+        env->state.phi[idx][1] = 0;
+        prob_tot += env->state.rho[idx][0];
     }
 
 #if 0
@@ -299,30 +344,30 @@ void gravity(const struct space *space, const struct state *state, const struct 
     //Log("Total Probability is %f\n", prob_tot);
     fftw_execute(plans->rho_f);
     #pragma omp parallel for private(j,i,idx)
-    for (k=0; k < space->Nz; k++) { idx = k * space->Nx * space->Ny;
-    for (j=0; j < space->Ny; j++)
-    for (i=0; i < space->Nx; i++)
+    for (k=0; k < env->space.Nz; k++) { idx = k * env->space.Nx * env->space.Ny;
+    for (j=0; j < env->space.Ny; j++)
+    for (i=0; i < env->space.Nx; i++)
     {
         double k2;
 
-        const int32_t io = i <= (space->Nx>>1) ? i : i-(space->Nx);
-        const int32_t jo = j <= (space->Ny>>1) ? j : j-(space->Ny);
-        const int32_t ko = k <= (space->Nz>>1) ? k : k-(space->Nz);
+        const int32_t io = i - env->space.Nx*(i > (env->space.Nx>>1));
+        const int32_t jo = j - env->space.Ny*(j > (env->space.Ny>>1));
+        const int32_t ko = k - env->space.Nz*(k > (env->space.Nz>>1));
 
-        k2 = pow(io*space->dkx,2)
-           + pow(jo*space->dky,2)
-           + pow(ko*space->dkz,2);
+        k2 = pow(io*env->space.dkx,2)
+           + pow(jo*env->space.dky,2)
+           + pow(ko*env->space.dkz,2);
 
         if (fabs(k2) > 1e-12)
         {
-            state->phi[idx][0] = state->rho[idx][0] / k2; // / (state->N);
-            //fprintf(stderr, "phi %g\n", state->phi[idx][0]);
-            state->phi[idx][1] = 0;
+            env->state.phi[idx][0] = env->state.rho[idx][0] / k2; // / (env->state.N);
+            //fprintf(stderr, "phi %g\n", env->state.phi[idx][0]);
+            env->state.phi[idx][1] = 0;
         }
         else
         {
-            state->phi[idx][0] = 0;
-            state->phi[idx][1] = 0;
+//          env->state.phi[idx][0] = 0;
+//          env->state.phi[idx][1] = 0;
         }
 
 
@@ -330,10 +375,10 @@ void gravity(const struct space *space, const struct state *state, const struct 
     }}
     fftw_execute(plans->phi_b);
     #pragma omp parallel for 
-    for (idx=0; idx < state->N; idx++)
+    for (idx=0; idx < env->state.N; idx++)
     {
-        state->phi[idx][0] /= (state->N);
-        state->phi[idx][1] /= (state->N);
+        env->state.phi[idx][0] /= (env->state.N);
+        env->state.phi[idx][1] /= (env->state.N);
     }
 #endif
 }
@@ -344,91 +389,117 @@ void gravity(const struct space *space, const struct state *state, const struct 
 int main(int argc, char **argv)
 {
     size_t nthreads = 6; //omp_get_num_threads();
-    struct state state;
-    struct space space;
+    struct env env;
     struct plans plans;
-    struct options opts;
     struct frame_buffer fb;
 
     double t;
     int step;
 
-    opts.with_gravity = 1;
-    opts.dt = 0.01 * 0.861522;
-    opts.tmax = opts.dt * 10000;
+    env.opts.with_gravity = 1;
+    //env.opts.dt = 0.01 * 0.861522;
+    env.opts.dt = 0.001 * 0.094638;
+    env.opts.tmax = env.opts.dt * 100000;
 
-#if 1
-    if (alloc_grafic("graficICs/256/level0", &state, &space) != 0)
+    env.cosmo.a_start = 1;
+    env.cosmo.H0 = 0.70;
+    env.cosmo.omega_m = 0.279;
+    env.cosmo.omega_v = 0.721;
+    env.cosmo.omega_r = 0;
+    env.cosmo.omega_k = 1 - (env.cosmo.omega_m + env.cosmo.omega_v + env.cosmo.omega_r);
+
+#if 0
+    if (alloc_grafic("graficICs/64/level0", &env) != 0)
     {
         Log("Failed to read input.\n");
         exit(1);
     }
 #endif
 
-    //ic_init_test1D(&state, &space);
+    ic_init_test1D(&env);
 
-    alloc_frame_buffer(&fb, imin(256, space.Nx), imin(256, space.Ny));
+    alloc_frame_buffer(&fb, imin(256, env.space.Nx), imin(256, env.space.Ny));
 
     fftw_init_threads();
     fftw_plan_with_nthreads(nthreads);
 
 
     Log("Creating plans...\n");
-#define PLAN(sp, st, var, dir) \
-    fftw_plan_dft_3d(sp.Nx, sp.Ny, sp.Nz, st. var, st. var, dir, FFTW_MEASURE)
+#define PLAN(var, dir) \
+    fftw_plan_dft_3d(env.space.Nx, env.space.Ny, env.space.Nz,env.state. var,env.state. var, dir, FFTW_MEASURE)
 
-    plans.psi_f = PLAN(space, state, psi, FFTW_FORWARD);
-    plans.phi_f = PLAN(space, state, phi, FFTW_FORWARD);
-    plans.rho_f = PLAN(space, state, rho, FFTW_FORWARD);
-    plans.psi_b = PLAN(space, state, psi, FFTW_BACKWARD);
-    plans.phi_b = PLAN(space, state, phi, FFTW_BACKWARD);
-    plans.rho_b = PLAN(space, state, rho, FFTW_BACKWARD);
+    plans.psi_f = PLAN(psi, FFTW_FORWARD);
+    plans.phi_f = PLAN(phi, FFTW_FORWARD);
+    plans.rho_f = PLAN(rho, FFTW_FORWARD);
+    plans.psi_b = PLAN(psi, FFTW_BACKWARD);
+    plans.phi_b = PLAN(phi, FFTW_BACKWARD);
+    plans.rho_b = PLAN(rho, FFTW_BACKWARD);
 
-#if 1
-    if (read_grafic("graficICs/256/level0", &state, &space) != 0)
+    double a = env.cosmo.a_start;
+    double H2 = 1 //pow(env->cosmo.H0, 2)
+             * (env.cosmo.omega_v + ((((env.cosmo.omega_r / a) + env.cosmo.omega_m) / a + env.cosmo.omega_k) / a));
+
+    env.cosmo.rho_crit = 3*H2 / (8*M_PI);
+
+#if 0
+    if (read_grafic("graficICs/64/level0", &env) != 0)
     {
         Log("Failed to load input.\n");
         exit(1);
     }
 #endif
 
-    //ic_test1D(&state, &space);
+    ic_test1D(&env);
 
-    assert(space.Nx == 1 || (space.Nx & 1) == 0);
-    assert(space.Ny == 1 || (space.Ny & 1) == 0);
-    assert(space.Nz == 1 || (space.Nz & 1) == 0);
+    env.cosmo.m = 1;
+    env.cosmo.h = 300 * sqrt(env.cosmo.rho_crit) * pow(env.space.dx,2) * env.cosmo.m;
+    env.cosmo.h_m = env.cosmo.h / env.cosmo.m;
+
+    Log("rho_crit at a=%0.4g is %0.4g\n", env.cosmo.a_start, env.cosmo.rho_crit);
+    Log("hbar     = %g\n", env.cosmo.h);
+    Log("m        = %g\n", env.cosmo.m);
+    Log("hbar / m = %g\n", env.cosmo.h_m);
+
+
+
+    assert(env.space.Nx == 1 || (env.space.Nx & 1) == 0);
+    assert(env.space.Ny == 1 || (env.space.Ny & 1) == 0);
+    assert(env.space.Nz == 1 || (env.space.Nz & 1) == 0);
 
     Log("Running simulation...\n");
 
-    //write_state(&state, &space);
+    write_state(&env);
 
     //capture_image(&space, &state, &fb);
     //write_image("frames/becon.%05i.phi.jpg", 0, &fb);
 
-    //capture_image_log(1, 100, cmap_tipsy, &space, &state, &fb);
-    //write_image("frames/becon.%05i.rho.jpg", 0, &fb);
+    //capture_image_log(1, 10000, cmap_tipsy, &env, &fb);
+    //write_image(&fb, "/tmp/becon.%05i.rho.jpg", 0);
 
-    for (t=0, step=1; t < opts.tmax; t = step++ * opts.dt)
+    //write_tipsy_grid(&env, "/tmp/becon.grid.bin");
+
+    for (t=0, step=1; t < env.opts.tmax; t = step++ * env.opts.dt)
     {
         Log("Time %8.4g  Step %i\n", t, step);
 
-        drift(opts.dt/2, &space, &state, &plans);
+        drift(env.opts.dt/2, &env, &plans);
 
 #if 1
         if (step % 10 == 0)
         {
-            capture_image_log(1, 100, cmap_tipsy, &space, &state, &fb);
+            //capture_image_log(1, 10*env.rho_max, cmap_tipsy, &env, &fb);
             //capture_image(&space, &state, &fb);
-            write_image("frames/becon.%05i.rho.jpg", step, &fb);
+            //write_image(&fb, "/tmp/becon.%05i.rho.jpg", step);
+            //write_ascii_rho(&env, "/tmp/becon.%05i.rho", step);
         }
 #endif
 
-        if (opts.with_gravity)
+        if (env.opts.with_gravity)
         {
-            gravity(&space, &state, &plans);
+            gravity(&env, &plans);
         }
 
-        kick(opts.dt, &space, &state, &plans);
+        kick(env.opts.dt, &env);
 
 
         //phi_harmonic_oscillator(&state, &space, 0,0,0, space.xmax/2, 0,0);
@@ -442,7 +513,7 @@ int main(int argc, char **argv)
         }
 #endif
 
-        //write_state(&state, &space);
+        write_state(&env);
     }
 
     Log("Simulation complete.\n");
@@ -457,9 +528,9 @@ int main(int argc, char **argv)
     fftw_destroy_plan(plans.rho_b);
     fftw_cleanup_threads();
 
-    fftw_free(state.psi);
-    fftw_free(state.phi);
-    fftw_free(state.rho);
+    fftw_free(env.state.psi);
+    fftw_free(env.state.phi);
+    fftw_free(env.state.rho);
 
     free_frame_buffer(&fb);
 
