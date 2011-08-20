@@ -1,6 +1,82 @@
 \documentclass{article}
 
+\newcommand{\U}[1]{\ensuremath{\mathrm{\ #1}}}
+
 \begin{document}
+
+\section{Units}
+Let $N$ be the grid size along one axis.
+\begin{equation}
+\begin{array}{ccl}
+G &=& 1 \\
+L &=& 1\U{Mpc} = 3.08568025\times 10^{22}\U{m} \\
+T &=& 1/H_0 \approx 4.323391200\times 10^{17}\U{s} \\
+\hbar/m &=& \frac{\Delta x^2}{N}\frac{2\pi}{T} \\
+\Delta x \Delta k &=& 2\pi / N. 
+\end{array}
+\end{equation}
+
+%$G = 1$, $\hbar = 1$, $H_0 = 1$\\
+%$[T] = 13.7\U{Gyr}$, \\
+%$[L] = 56.36041080\U{m}$\\
+%$[M] = 6.967031011\times 10^{-21}\U{kg}$ \\
+%$[\rho] = 3.8915740058804702 \times 10^{-26}\U{kg/m^3}$
+%
+%\bigskip\noindent
+%Using Maple to find $[L]$ and $[M]$:
+%\begin{verbatim}
+%> Gsi  := 6.673e-11;
+%> hbar := 1.05457148e-34;
+%> yr   := 3600 * 24 * 365.25 * s;
+%> tick := 13.7e9 * yr;
+%> f1   := lap^3 / tick^2 / marb = Gsi * m^3 / s^2 / kg;
+%> f2   := marb * lap^2 / tick = hbar * m^2 * kg / s;
+%> solve({f1,f2});
+%\end{verbatim}
+
+\section{Initial Conditions}
+
+GRAFIC provides a fixed grid of the density fluctuations $\delta(r)$ and the
+velocity field $v(r)$. The phase $\phi$ of the wave function $\Psi = R e^{i\phi}$
+is related to $v$ by
+\begin{equation}
+v = \frac{\hbar}{m}\phi_x
+\end{equation}
+%
+To find the initial wave function $\Psi_0$ we integrate
+\begin{equation}
+\oint \vec v \cdot dr = \frac{\hbar}{m}\int d\phi = \frac{\hbar}{m}\phi
+\end{equation}
+%
+Since the curl of $v$ vanishes we can chose any path for the integral.
+
+\section{FFT Leap Frog}
+
+Drift, gravity, kick. Rinse and repeat.
+
+\begin{equation}
+\begin{array}{rcl}
+%
+\tilde\Psi_n &=& FT(\Psi_{n-1}) \\
+\tilde\Psi'_n &=& \tilde\Psi_n\exp(\frac{-i\hbar k^2}{2m}\frac{\Delta t}{2}) \\
+\Psi'_n &=& IFT(\tilde\Psi'_n) \\
+\end{array}
+%
+\begin{array}{rcl}
+\rho_n &=& |\Psi'_n|^2 \\
+\tilde\rho_n &=& FT(\rho_n) \\
+\tilde\Phi_n &=& \tilde\rho_n / k^2 \\
+\Phi_n &=& IFT( \tilde\Phi_n) \\
+\end{array}
+%
+\begin{array}{rcl}
+\Psi_n &=& \Psi'_n\exp(\frac{-i\Phi_n\Delta t}{\hbar}) \\
+\end{array}
+%
+\end{equation}
+
+
+\section{Euler Equations}
 
 Let $\rho = \rho(x,t)$ and $R^2 \equiv \rho$.
 %
