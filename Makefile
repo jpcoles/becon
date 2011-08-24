@@ -1,9 +1,14 @@
-FFTW_LDFLAGS=$(shell PKG_CONFIG_PATH=/opt/fftw/3.2.2/gnu/lib/pkgconfig pkg-config fftw3 --libs)
-FFTW_CFLAGS=$(shell PKG_CONFIG_PATH=/opt/fftw/3.2.2/gnu/lib/pkgconfig pkg-config fftw3 --cflags)
+FFTW_LDFLAGS=-L/usr/local/lib -lfftw3 -lm 
+FFTW_CFLAGS=-I/usr/local/include
+#FFTW_LDFLAGS=$(shell PKG_CONFIG_PATH=/opt/fftw/3.2.2/gnu/lib/pkgconfig pkg-config fftw3 --libs)
+#FFTW_CFLAGS=$(shell PKG_CONFIG_PATH=/opt/fftw/3.2.2/gnu/lib/pkgconfig pkg-config fftw3 --cflags)
 CC=gcc
 CFLAGS=-O3 -Wall -g -fopenmp $(FFTW_CFLAGS)
 CFLAGS+=-funroll-loops -ftree-vectorize -fno-omit-frame-pointer -fprefetch-loop-arrays -mssse3
 LDFLAGS=-lpthread -lfftw3_threads $(FFTW_LDFLAGS) -ljpeg -lgomp
+
+CFLAGS+=-I/opt/local/include
+LDFLAGS+=-L/opt/local/lib -ljpeg
 
 all: becon
 

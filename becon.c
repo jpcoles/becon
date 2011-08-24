@@ -59,14 +59,14 @@ void ic_init_test1D(struct env *env)
     env->cosmo.omega_k = 1 - (env->cosmo.omega_m + env->cosmo.omega_v + env->cosmo.omega_r);
     env->cosmo.rho_crit = 1;
 
-    env->space.Nx = 1 << 8;
+    env->space.Nx = 1 << 12;
     env->space.Ny = 1;
     env->space.Nz = 1;
 
     env->space.dx = 1; //(env->space.xmax-env->space.xmin) / env->space.Nx;
 
     env->space.xmin = -env->space.dx * env->space.Nx/2;
-    env->space.xmax = -env->space.xmax;
+    env->space.xmax = -env->space.xmin;
     env->space.ymin = 0.0;
     env->space.ymax = 0.0;
     env->space.zmin = 0.0;
@@ -104,10 +104,10 @@ void ic_test1D(struct env *env)
 
     for (x=0; x < env->space.Nx; x++)
     {
-        double rho = env->cosmo.rho_crit * exp(-1 * pow(env->space.xmin + x*env->space.dx,2) / pow(env->space.xmax-env->space.xmin,2));
+        double rho = env->cosmo.rho_crit * exp(-30 * pow(env->space.xmin + x*env->space.dx,2) / pow(env->space.xmax-env->space.xmin,2));
 
-        if (x < env->space.Nx/8 || x > env->space.Nx - (env->space.Nx / 8))
-            rho = 0;
+//      if (x < env->space.Nx/8 || x > env->space.Nx - (env->space.Nx / 8))
+//          rho = 0;
 
         env->state.psi[x][0] = sqrt(rho);
         //fprintf(stderr, "%f\n", s->psi[x][0]);
@@ -146,7 +146,7 @@ void write_state(struct env *env)
             {
                 if (i > 0) fprintf(stdout, ", ");
                 //fprintf(stdout, "%.3g+%.3gj", s->phi[idx][0], s->phi[idx][1]);
-                fprintf(stdout, "%.5g+%.5gj", env->state.psi[idx][0], env->state.psi[idx][1]);
+                fprintf(stdout, "%.8g+%.8gj", env->state.psi[idx][0], env->state.psi[idx][1]);
                 //fprintf(stdout, "%.3g+%.3gj", s->rho[idx][0], s->rho[idx][1]);
                 idx++;
             }
@@ -302,8 +302,8 @@ void kick(const double dt, const struct env *env)
         const long double p0  = env->state.psi[idx][0];
         const long double p1  = env->state.psi[idx][1];
         const long double phi = env->state.phi[idx][0];
-        const long double c = cosl(-phi * dt / env->cosmo.h);
-        const long double s = sinl(-phi * dt / env->cosmo.h);
+        const long double c = cosl(phi * dt / env->cosmo.h);
+        const long double s = sinl(phi * dt / env->cosmo.h);
 
         env->state.psi[idx][0] = c*p0 - s*p1;
         env->state.psi[idx][1] = c*p1 + s*p0;
@@ -398,8 +398,8 @@ int main(int argc, char **argv)
 
     env.opts.with_gravity = 1;
     //env.opts.dt = 0.01 * 0.861522;
-    env.opts.dt = 0.001 * 0.094638;
-    env.opts.tmax = env.opts.dt * 100000;
+    env.opts.dt = 0.1 * 0.094638;
+    env.opts.tmax = env.opts.dt * 0; //100000;
 
     env.cosmo.a_start = 1;
     env.cosmo.H0 = 0.70;
@@ -408,7 +408,7 @@ int main(int argc, char **argv)
     env.cosmo.omega_r = 0;
     env.cosmo.omega_k = 1 - (env.cosmo.omega_m + env.cosmo.omega_v + env.cosmo.omega_r);
 
-#if 0
+#if 1
     if (alloc_grafic("graficICs/64/level0", &env) != 0)
     {
         Log("Failed to read input.\n");
@@ -416,7 +416,7 @@ int main(int argc, char **argv)
     }
 #endif
 
-    ic_init_test1D(&env);
+    //ic_init_test1D(&env);
 
     alloc_frame_buffer(&fb, imin(256, env.space.Nx), imin(256, env.space.Ny));
 
@@ -441,7 +441,7 @@ int main(int argc, char **argv)
 
     env.cosmo.rho_crit = 3*H2 / (8*M_PI);
 
-#if 0
+#if 1
     if (read_grafic("graficICs/64/level0", &env) != 0)
     {
         Log("Failed to load input.\n");
@@ -449,16 +449,18 @@ int main(int argc, char **argv)
     }
 #endif
 
-    ic_test1D(&env);
+    //ic_test1D(&env);
 
     env.cosmo.m = 1;
-    env.cosmo.h = 300 * sqrt(env.cosmo.rho_crit) * pow(env.space.dx,2) * env.cosmo.m;
+    double v = sqrt(env.cosmo.rho_crit) * pow(env.space.dx,2) * env.cosmo.m;
+    env.cosmo.h = 1e3; //300 * v;
     env.cosmo.h_m = env.cosmo.h / env.cosmo.m;
 
     Log("rho_crit at a=%0.4g is %0.4g\n", env.cosmo.a_start, env.cosmo.rho_crit);
     Log("hbar     = %g\n", env.cosmo.h);
     Log("m        = %g\n", env.cosmo.m);
     Log("hbar / m = %g\n", env.cosmo.h_m);
+    Log("LambdaDB = %g\n", env.cosmo.h_m / v);
 
 
 
@@ -468,13 +470,13 @@ int main(int argc, char **argv)
 
     Log("Running simulation...\n");
 
-    write_state(&env);
+    //write_state(&env);
 
     //capture_image(&space, &state, &fb);
     //write_image("frames/becon.%05i.phi.jpg", 0, &fb);
 
-    //capture_image_log(1, 10000, cmap_tipsy, &env, &fb);
-    //write_image(&fb, "/tmp/becon.%05i.rho.jpg", 0);
+    capture_image_log(1, 10000, cmap_tipsy, &env, &fb);
+    write_image(&fb, "/tmp/becon.%05i.rho.jpg", 0);
 
     //write_tipsy_grid(&env, "/tmp/becon.grid.bin");
 
@@ -487,9 +489,9 @@ int main(int argc, char **argv)
 #if 1
         if (step % 10 == 0)
         {
-            //capture_image_log(1, 10*env.rho_max, cmap_tipsy, &env, &fb);
+            capture_image_log(1, 10*env.rho_max, cmap_tipsy, &env, &fb);
             //capture_image(&space, &state, &fb);
-            //write_image(&fb, "/tmp/becon.%05i.rho.jpg", step);
+            write_image(&fb, "/tmp/becon.%05i.rho.jpg", step);
             //write_ascii_rho(&env, "/tmp/becon.%05i.rho", step);
         }
 #endif
