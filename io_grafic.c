@@ -62,9 +62,26 @@ int alloc_grafic(const char *dirname, struct env *env)
     env->cosmo.omega_m = hdr.omegam;
     env->cosmo.omega_v = hdr.omegav;
     env->cosmo.H0      = hdr.h0;
+    env->cosmo.h       = hdr.h0 / 100.;
 
     env->cosmo.omega_r = 0;
     env->cosmo.omega_k = 1 - (env->cosmo.omega_m + env->cosmo.omega_v + env->cosmo.omega_r);
+
+    env->consts.si.H0 = hdr.h0 / 3.08568025e19;
+
+    double Delta = hdr.dx / env->cosmo.h * 3.08568025e22;
+    env->eta = env->bec.m * pow(Delta,2) * env->consts.si.H0 / env->consts.si.hbar;
+
+#if 0
+    fprintf(stderr, "dx %e\n", hdr.dx);
+    fprintf(stderr, "h %e\n", env->cosmo.h);
+    fprintf(stderr, "bec m %e\n", env->bec.m);
+    fprintf(stderr, "H0 %e\n", env->consts.si.H0);
+    fprintf(stderr, "Box %e\n", Delta * hdr.np1);
+    fprintf(stderr, "Delta %e\n", Delta);
+    fprintf(stderr, "ETA %f\n", env->eta);
+    exit(0);
+#endif
 
 
     env->space.Nx = hdr.np1;

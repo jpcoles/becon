@@ -37,7 +37,7 @@ int write_image(struct frame_buffer *fb, const char *fmt, ...)
     if (fp != NULL)
     {
         Log("Writing %s...\n", fname);
-        write_frame_buffer(fp, fb);
+        write_frame_buffer_png(fp, fb);
         fclose(fp);
     }
 
@@ -119,10 +119,11 @@ int capture_image_log(double min, double max, cmap_t cmap, struct env *env, stru
         size_t o = iy * fb->width + ix;
 
         double q = pow(env->state.psi[idx][0],2) + pow(env->state.psi[idx][1],2);
-        double v = (log10(q) - log10(min)) / (log10(max) - log10(min));
+
+        q /= env->cosmo.rho_crit;
+        double v = q==0 ? 0 : (log10(q) - min) / (max - min);
 
         assert(v == 0 || isnormal(v));
-        if (v < 0) v = 0;
 
         if (v > fb->buf[o])
             fb->buf[o] = v;

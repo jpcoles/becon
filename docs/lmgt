@@ -1,0 +1,27 @@
+km          := 1000 * m;
+year        := 3600 * 24 * 365.25 * s;
+kpc         := 3.08568025e19 * m;
+Mpc         := 1000 * kpc;
+
+L := 1e6 * m;
+M := 1e-18 * kg; #.198892e31*kg;
+G := 1;
+
+mp := 1e-22 * kg;
+
+
+Gsi := .667384e-10*m^3/kg/s^2;
+hbar := .105457148e-33*m^2*kg/s;
+#H := 1e-20;
+
+T := solve(L^3 / M / q^2 * G = Gsi, q)[2];
+H := solve(L^2 * M / T * q = hbar, q);
+
+#T := solve(L^2 * M / q * H = hbar, q);
+
+c := 3e8 *m/s / L * T;
+H0 := 72 * km / s / Mpc * T;
+
+mp/M;
+H / (mp/M);
+

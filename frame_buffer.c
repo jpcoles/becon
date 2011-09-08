@@ -28,7 +28,7 @@ int free_frame_buffer(struct frame_buffer *fb)
     return 0;
 }
 
-void write_frame_buffer(FILE *outfile, struct frame_buffer *fb)
+void write_frame_buffer_jpeg(FILE *outfile, struct frame_buffer *fb)
 {
     struct jpeg_compress_struct cinfo;
     struct jpeg_error_mgr jerr;
@@ -60,3 +60,43 @@ void write_frame_buffer(FILE *outfile, struct frame_buffer *fb)
     jpeg_destroy_compress(&cinfo);
 
 }
+
+void write_frame_buffer_png(FILE *outfile, struct frame_buffer *fb)
+{
+    int i;
+
+    assert(fb->samples == 3);
+
+    png_structp png_ptr = png_create_write_struct
+       (PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
+    if (!png_ptr) return;
+
+    png_init_io(png_ptr, outfile);
+
+    png_infop info_ptr = png_create_info_struct(png_ptr);
+    if (!info_ptr)
+    {
+       png_destroy_write_struct(&png_ptr, (png_infopp)NULL);
+       return;
+    }
+
+    png_set_IHDR(png_ptr, info_ptr, fb->width, fb->height,
+           8, PNG_COLOR_TYPE_RGB, PNG_INTERLACE_NONE,
+           PNG_COMPRESSION_TYPE_DEFAULT, PNG_FILTER_TYPE_DEFAULT);
+
+    png_write_info(png_ptr, info_ptr);
+
+    int row_stride = fb->width * fb->samples;
+
+    for (i=0; i < fb->height; i++)
+    {
+        png_bytep row_pointer = & (fb->img[i * row_stride]);
+        png_write_row(png_ptr, row_pointer);
+    }
+
+    png_write_end(png_ptr, info_ptr);
+
+    png_destroy_write_struct(&png_ptr, &info_ptr);
+}
+
+

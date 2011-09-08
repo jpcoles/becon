@@ -1,0 +1,27 @@
+interface(echo = 3);
+
+km          := 1000 * m;
+year        := 3600 * 24 * 365.25 * s;
+kpc         := 3.08568025e19 * m;
+Mpc         := 1000 * kpc;
+c           := 3e8 * m/s;
+hbar        := 6.58211928e-16 * ev*s;
+
+a           := 1;
+h           := 0.71;
+M           := (2.5e-22) * ev / c^2;
+
+H0          := h * 100 * km/s/Mpc;
+Box         := 1 * Mpc/h;
+Grid        := 128;
+Delta       := Box / Grid;
+
+# Don't trust the eta value in (Woo and Chiueh 2009)
+
+eta         := M*(Delta^2)*H0/hbar;
+
+# Jeans wavenumber and wavelength
+
+kJ          := (6*a)^(0.25) * sqrt(eta) / Delta;
+lJ          := 2*3.1415 / kJ / kpc;
+

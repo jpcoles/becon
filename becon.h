@@ -39,12 +39,15 @@ struct options
     char *input;
     double dt;
     double tmax;
+    int noutputs;
 };
 
 struct cosmo
 {
+    double a;
     double a_start;
     double H0;
+    double h;
 
     double rho_crit;
 
@@ -52,8 +55,32 @@ struct cosmo
     double omega_m, omega_v, omega_r, omega_k;
 
     /* hbar / m */
-    double h_m;
-    double h,m;
+    //double h_m;
+    //double h,m;
+
+
+};
+
+struct bec
+{
+    double m;
+};
+
+struct consts
+{
+    struct {
+        double c;
+        double hbar;
+        double H0;
+        double G;
+    } si;
+
+    struct {
+        double c;
+        double hbar;
+        double H0;
+        double G;
+    } in;
 };
 
 struct env
@@ -63,9 +90,19 @@ struct env
 
     struct cosmo cosmo;
 
+    struct bec bec;
+    struct consts consts;
+
     struct options opts;
 
-    double rho_max, rho_min;
+    double rho_max, rho_min, rho_avg;
+    double phi_max;
+
+    double kick_exp, drift_exp;
+    double eta;
+    double dt;
+
+    double kmax2;
 };
 
 #endif

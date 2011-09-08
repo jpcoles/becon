@@ -1,3 +1,7 @@
+#ifdef _OPENMP
+#include <omp.h>
+#endif
+
 #include <float.h>
 #include <assert.h>
 #include <math.h>
@@ -13,6 +17,8 @@
 #include "io_image.h"
 #include "frame_buffer.h"
 #include "cmap.h"
+
+#include "ic_spherical_collapse.h"
 
 inline int imin(int a, int b)
 {
@@ -242,12 +248,12 @@ void drift(const double dt, struct env * const env, const struct plans *plans)
            + pow(jo*env->space.dky,2)
            + pow(ko*env->space.dkz,2);
 
-        k2 /= 2;
+        //k2 /= 2;
 
         //fprintf(stderr, "%ld %f\n", idx, env->state.psi[idx][1]);
 
-        const long double c = cosl(-env->cosmo.h_m * k2 * dt);
-        const long double s = sinl(-env->cosmo.h_m * k2 * dt);
+        const long double c = cosl(-env->drift_exp * k2 * dt);
+        const long double s = sinl(-env->drift_exp * k2 * dt);
         const long double p0 = env->state.psi[idx][0] / sqrt(env->state.N);
         const long double p1 = env->state.psi[idx][1] / sqrt(env->state.N);
 
@@ -262,28 +268,43 @@ void drift(const double dt, struct env * const env, const struct plans *plans)
 
     //write_state(env);
 
+    double rho_avg = 0;
     env->rho_max = 0;
     env->rho_min = FLT_MAX;
+
     fftw_execute(plans->psi_b);
-    #pragma omp parallel for 
-    for (idx=0; idx < env->state.N; idx++)
+    #pragma omp parallel
     {
-        env->state.psi[idx][0] /= sqrt(env->state.N);
-        env->state.psi[idx][1] /= sqrt(env->state.N);
+        double rho_max = 0;
+        double rho_min = FLT_MAX;
 
-        //double mag2 = pow(env->state.psi[idx][0],2) + pow(env->state.psi[idx][1],2);
-        //fprintf(stderr, "%ld %.20f %.20f\n", idx, mag2, env->state.rho[idx][0]);
-        //assert(fabs(env->state.psi[idx][1]) < 1e-12);
-        
-        //assert(fdim(mag2, env->state.rho[idx][0]) < 1e-8);
+        #pragma omp for reduction(+:rho_avg)
+        for (idx=0; idx < env->state.N; idx++)
+        {
+            env->state.psi[idx][0] /= sqrt(env->state.N);
+            env->state.psi[idx][1] /= sqrt(env->state.N);
 
-        double q = pow(env->state.psi[idx][0],2) + pow(env->state.psi[idx][1],2);
+            //double mag2 = pow(env->state.psi[idx][0],2) + pow(env->state.psi[idx][1],2);
+            //fprintf(stderr, "%ld %.20f %.20f\n", idx, mag2, env->state.rho[idx][0]);
+            //assert(fabs(env->state.psi[idx][1]) < 1e-12);
+            
+            //assert(fdim(mag2, env->state.rho[idx][0]) < 1e-8);
 
+            double q = cmag2(env->state.psi[idx]);
 
-        env->rho_max = MAX(env->rho_max, q);
-        env->rho_min = MIN(env->rho_min, q);
+            rho_max = MAX(rho_max, q);
+            rho_min = MIN(rho_min, q);
+            rho_avg += q;
+        }
 
+        #pragma omp critical
+        {
+            env->rho_max = MAX(env->rho_max, rho_max);
+            env->rho_min = MIN(env->rho_min, rho_min);
+        }
     }
+
+    env->rho_avg = rho_avg / env->state.N;
 
     idx=0;
     //fprintf(stderr, "%f %f\n", env->state.psi[0][0], env->state.rho[0][0]);
@@ -302,8 +323,8 @@ void kick(const double dt, const struct env *env)
         const long double p0  = env->state.psi[idx][0];
         const long double p1  = env->state.psi[idx][1];
         const long double phi = env->state.phi[idx][0];
-        const long double c = cosl(phi * dt / env->cosmo.h);
-        const long double s = sinl(phi * dt / env->cosmo.h);
+        const long double c = cosl(phi * dt * env->kick_exp);
+        const long double s = sinl(phi * dt * env->kick_exp);
 
         env->state.psi[idx][0] = c*p0 - s*p1;
         env->state.psi[idx][1] = c*p1 + s*p0;
@@ -315,9 +336,9 @@ void kick(const double dt, const struct env *env)
 //==============================================================================
 //                                   gravity
 //==============================================================================
-void gravity(const struct env *env, const struct plans *plans)
+void gravity(struct env * const env, const struct plans *plans)
 {
-    size_t idx;
+    size_t idx, idx_center;
     int32_t i,j,k;
 
     double prob_tot = 0;
@@ -336,11 +357,16 @@ void gravity(const struct env *env, const struct plans *plans)
     if (step % 100 == 0)
     {
         capture_image(&space, &state, &fb);
-        write_image("frames/becon.%05i.phi.jpg", step, &fb);
+        write_image("frames/becon.%05i.phi.png", step, &fb);
     }
 #endif
 
 #if 1
+    idx_center = env->state.N;
+    idx_center >>= env->space.Nx > 1;
+    idx_center >>= env->space.Ny > 1;
+    idx_center >>= env->space.Nz > 1;
+
     //Log("Total Probability is %f\n", prob_tot);
     fftw_execute(plans->rho_f);
     #pragma omp parallel for private(j,i,idx)
@@ -358,27 +384,40 @@ void gravity(const struct env *env, const struct plans *plans)
            + pow(jo*env->space.dky,2)
            + pow(ko*env->space.dkz,2);
 
-        if (fabs(k2) > 1e-12)
+        if (k2 != 0) //idx != idx_center)
         {
             env->state.phi[idx][0] = env->state.rho[idx][0] / k2; // / (env->state.N);
+            env->state.phi[idx][1] = env->state.rho[idx][1] / k2; // / (env->state.N);
             //fprintf(stderr, "phi %g\n", env->state.phi[idx][0]);
-            env->state.phi[idx][1] = 0;
         }
         else
         {
-//          env->state.phi[idx][0] = 0;
-//          env->state.phi[idx][1] = 0;
+            /* Treating k2==0 by setting phi=0 subtracts off the mean density */
+            env->state.phi[idx][0] = 0;
+            env->state.phi[idx][1] = 0;
         }
 
 
         idx++;
     }}
     fftw_execute(plans->phi_b);
-    #pragma omp parallel for 
-    for (idx=0; idx < env->state.N; idx++)
+
+    env->phi_max = 0;
+    #pragma omp parallel 
     {
-        env->state.phi[idx][0] /= (env->state.N);
-        env->state.phi[idx][1] /= (env->state.N);
+        double phi_max = 0;
+        #pragma omp for 
+        for (idx=0; idx < env->state.N; idx++)
+        {
+            env->state.phi[idx][0] /= (env->state.N);
+            env->state.phi[idx][1] /= (env->state.N);
+            phi_max = MAX(phi_max, env->state.phi[idx][0]);
+        }
+
+        #pragma omp critical
+        {
+            env->phi_max = MAX(env->phi_max, phi_max);
+        }
     }
 #endif
 }
@@ -388,7 +427,8 @@ void gravity(const struct env *env, const struct plans *plans)
 //==============================================================================
 int main(int argc, char **argv)
 {
-    size_t nthreads = 6; //omp_get_num_threads();
+    size_t idx;
+    size_t nthreads = omp_get_num_threads();
     struct env env;
     struct plans plans;
     struct frame_buffer fb;
@@ -398,8 +438,9 @@ int main(int argc, char **argv)
 
     env.opts.with_gravity = 1;
     //env.opts.dt = 0.01 * 0.861522;
-    env.opts.dt = 0.1 * 0.094638;
-    env.opts.tmax = env.opts.dt * 0; //100000;
+    //env.opts.dt = 0.01 * 0.094638;
+    env.opts.dt = 0.1 * 0.013410;
+    env.opts.tmax = env.opts.dt * 10000;
 
     env.cosmo.a_start = 1;
     env.cosmo.H0 = 0.70;
@@ -408,8 +449,15 @@ int main(int argc, char **argv)
     env.cosmo.omega_r = 0;
     env.cosmo.omega_k = 1 - (env.cosmo.omega_m + env.cosmo.omega_v + env.cosmo.omega_r);
 
-#if 1
-    if (alloc_grafic("graficICs/64/level0", &env) != 0)
+    env.consts.si.c = 3e8;  // [m/s]
+    env.consts.si.hbar = 6.58211928e-16;  // [eV s]
+    env.consts.si.H0 = 0.73 / 3.08568025e19; // [s^-1]
+    env.consts.si.G  = 6.6738480e-11; // [m^3 kg^-1 s^-2]
+
+    env.bec.m = 2.5e-22 / pow(env.consts.si.c,2);   // [eV / c^2]
+
+#if 0
+    if (alloc_grafic("graficICs/128/level0", &env) != 0)
     {
         Log("Failed to read input.\n");
         exit(1);
@@ -417,6 +465,21 @@ int main(int argc, char **argv)
 #endif
 
     //ic_init_test1D(&env);
+
+    ic_init_spherical_collapse(&env);
+
+    #pragma omp parallel for 
+    for (idx=0; idx < env.state.N; idx++)
+    {
+        env.state.psi[idx][0] = 0;
+        env.state.psi[idx][1] = 0;
+
+        env.state.phi[idx][0] = 0;
+        env.state.phi[idx][1] = 0;
+
+        env.state.rho[idx][0] = 0;
+        env.state.rho[idx][1] = 0;
+    }
 
     alloc_frame_buffer(&fb, imin(256, env.space.Nx), imin(256, env.space.Ny));
 
@@ -436,13 +499,13 @@ int main(int argc, char **argv)
     plans.rho_b = PLAN(rho, FFTW_BACKWARD);
 
     double a = env.cosmo.a_start;
-    double H2 = 1 //pow(env->cosmo.H0, 2)
-             * (env.cosmo.omega_v + ((((env.cosmo.omega_r / a) + env.cosmo.omega_m) / a + env.cosmo.omega_k) / a));
+    double H2 = pow(env.cosmo.H0, 2)
+             * (env.cosmo.omega_v + ((((env.cosmo.omega_r / a) + env.cosmo.omega_m) / a + env.cosmo.omega_k) / a / a));
 
     env.cosmo.rho_crit = 3*H2 / (8*M_PI);
 
-#if 1
-    if (read_grafic("graficICs/64/level0", &env) != 0)
+#if 0
+    if (read_grafic("graficICs/128/level0", &env) != 0)
     {
         Log("Failed to load input.\n");
         exit(1);
@@ -451,16 +514,25 @@ int main(int argc, char **argv)
 
     //ic_test1D(&env);
 
-    env.cosmo.m = 1;
-    double v = sqrt(env.cosmo.rho_crit) * pow(env.space.dx,2) * env.cosmo.m;
-    env.cosmo.h = 1e3; //300 * v;
-    env.cosmo.h_m = env.cosmo.h / env.cosmo.m;
+    ic_spherical_collapse(&env);
+
+    //env.cosmo.m = 1;
+    //double v = sqrt(env.cosmo.rho_crit) * pow(env.space.dx,2) * env.cosmo.m;
+    //env.cosmo.h = 1e2; //300 * v;
+    //env.cosmo.h_m = env.cosmo.h / env.cosmo.m;
+    env.cosmo.a = env.cosmo.a_start;
+
+    //env.eta = 1.119449183; /* XXX: only valid for 128^3 sim */
+
 
     Log("rho_crit at a=%0.4g is %0.4g\n", env.cosmo.a_start, env.cosmo.rho_crit);
-    Log("hbar     = %g\n", env.cosmo.h);
-    Log("m        = %g\n", env.cosmo.m);
-    Log("hbar / m = %g\n", env.cosmo.h_m);
-    Log("LambdaDB = %g\n", env.cosmo.h_m / v);
+    Log("bec m      = %g\n", env.bec.m);
+    Log("eta        = %g\n", env.eta);
+    //Log("hbar     = %g\n", env.cosmo.h);
+    //Log("m        = %g\n", env.cosmo.m);
+    //Log("hbar / m = %g\n", env.cosmo.h_m);
+    //Log("LambdaDB = %g\n", env.cosmo.h_m / v);
+
 
 
 
@@ -473,25 +545,54 @@ int main(int argc, char **argv)
     //write_state(&env);
 
     //capture_image(&space, &state, &fb);
-    //write_image("frames/becon.%05i.phi.jpg", 0, &fb);
+    //write_image("frames/becon.%05i.phi.png", 0, &fb);
 
-    capture_image_log(1, 10000, cmap_tipsy, &env, &fb);
-    write_image(&fb, "/tmp/becon.%05i.rho.jpg", 0);
+    capture_image_log(-1, 0, cmap_tipsy, &env, &fb);
+    write_image(&fb, "/tmp/becon.%05i.rho.png", 0);
+
+    //goto shutdown;
 
     //write_tipsy_grid(&env, "/tmp/becon.grid.bin");
 
-    for (t=0, step=1; t < env.opts.tmax; t = step++ * env.opts.dt)
+    if (env.opts.with_gravity)
     {
-        Log("Time %8.4g  Step %i\n", t, step);
+        gravity(&env, &plans);
+    }
 
-        drift(env.opts.dt/2, &env, &plans);
+    env.opts.dt = env.dt * 10;
+
+    for (t=0, step=0; t < env.opts.tmax; t += env.dt)
+    {
+        Log("Time %8.4g  Step %i\n", t, step+1);
+
+        /* XXX: Be careful here to change drift_exp at the right time.
+         * Shouldn't do this before a complete timestep is finished */
+        //env.drift_exp = 1. / (2 * env.eta * pow(env.cosmo.a, 2));
+        //env.kick_exp  = 3 * env.cosmo.omega_m * env.eta / (2 * env.cosmo.a);
+
+        //env.dt = M_PI * env.cosmo.a / (6 * env.cosmo.omega_m * env.eta * env.phi_max);
+        //
+        
+        //fprintf(stderr, "%f %f\n", env.dt, env.kick_exp * M_PI_4);
+        //fprintf(stderr, "%f %f\n", env.dt, env.drift_exp * M_PI_4);
+        assert(env.kmax2 * env.drift_exp * env.dt/2 <= M_PI_4);
+        //assert(env.kick_exp * env.dt <= M_PI_4);
+
+        drift(env.dt/2, &env, &plans);
 
 #if 1
-        if (step % 10 == 0)
+        if (t >= env.opts.dt * (step+1))
         {
-            capture_image_log(1, 10*env.rho_max, cmap_tipsy, &env, &fb);
+            step++;
+            t = step * env.opts.dt;
+
+            Log("rho_min is %.8g\n", env.rho_min);
+            Log("rho_max is %.8g\n", env.rho_max);
+            Log("rho_avg is %.8g\n", env.rho_avg);
+            capture_image_log(-2, 6, cmap_tipsy, &env, &fb);
+            //capture_image_log(1, 10*env.rho_max, cmap_tipsy, &env, &fb);
             //capture_image(&space, &state, &fb);
-            write_image(&fb, "/tmp/becon.%05i.rho.jpg", step);
+            write_image(&fb, "/tmp/becon.%05i.rho.png", step);
             //write_ascii_rho(&env, "/tmp/becon.%05i.rho", step);
         }
 #endif
@@ -501,7 +602,7 @@ int main(int argc, char **argv)
             gravity(&env, &plans);
         }
 
-        kick(env.opts.dt, &env);
+        kick(env.dt, &env);
 
 
         //phi_harmonic_oscillator(&state, &space, 0,0,0, space.xmax/2, 0,0);
@@ -515,8 +616,10 @@ int main(int argc, char **argv)
         }
 #endif
 
-        write_state(&env);
+        //write_state(&env);
     }
+
+shutdown:
 
     Log("Simulation complete.\n");
 
