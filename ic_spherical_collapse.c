@@ -14,9 +14,9 @@ int ic_init_spherical_collapse(struct env *env)
     env->cosmo.omega_k = 1 - (env->cosmo.omega_m + env->cosmo.omega_v + env->cosmo.omega_r);
     env->cosmo.rho_crit = 1;
 
-    env->space.Nx =
-    env->space.Ny =
-    env->space.Nz = 128;
+    env->space.Nx = 1024;
+    env->space.Ny = 1024;
+    env->space.Nz = 1;
 
     env->space.dx = 1. / env->space.Nz;
 
@@ -60,9 +60,9 @@ int ic_spherical_collapse(struct env *env)
 
     struct space *sp = &env->space;
 
-    double R = sp->Nx/16 * sp->dx;
+    double R = sp->Nx/4 * sp->dx;
 
-    const double rho = 1e9;
+    const double rho = 1e1;
 
     for (k=0; k < sp->Nz; k++)
     for (j=0; j < sp->Ny; j++)
@@ -104,8 +104,11 @@ int ic_spherical_collapse(struct env *env)
     env->consts.in.H0 = .09032202799;
     env->consts.in.G  = 1;
 
-    env->consts.in.hbar = 0.00001290886701;
-    env->bec.m = 1e-4;
+    //env->consts.in.hbar = 0.00001290886701;
+    //env->bec.m = 1e-4;
+
+    env->consts.in.hbar = 10;
+    env->bec.m = 1;
 
     env->drift_exp = env->consts.in.hbar / env->bec.m / 2;
     env->kick_exp  = env->bec.m / env->consts.in.hbar;

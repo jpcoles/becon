@@ -63,9 +63,9 @@ void ic_init_test1D(struct env *env)
     env->cosmo.omega_v = 0.721;
     env->cosmo.omega_r = 0;
     env->cosmo.omega_k = 1 - (env->cosmo.omega_m + env->cosmo.omega_v + env->cosmo.omega_r);
-    env->cosmo.rho_crit = 1;
+    env->cosmo.rho_crit = 10;
 
-    env->space.Nx = 1 << 12;
+    env->space.Nx = 1 << 10;
     env->space.Ny = 1;
     env->space.Nz = 1;
 
@@ -78,13 +78,16 @@ void ic_init_test1D(struct env *env)
     env->space.zmin = 0.0;
     env->space.zmax = 0.0;
 
-
-
     env->space.dkx = fabs(env->space.dx) != 0 ? 2*M_PI/(env->space.dx * env->space.Nx) : 0;
     env->space.dky = fabs(env->space.dx) != 0 ? 2*M_PI/(env->space.dx * env->space.Ny) : 0;
     env->space.dkz = fabs(env->space.dx) != 0 ? 2*M_PI/(env->space.dx * env->space.Nz) : 0;
 
+    env->kmax2 = pow((env->space.Nx>>1)*env->space.dkx,2)
+               + pow((env->space.Ny>>1)*env->space.dky,2)
+               + pow((env->space.Nz>>1)*env->space.dkz,2);
+
     //Log("dt: %g\n", dt);
+    Log("    kmax2: %g\n", env->kmax2);
     Log("    dx: %g\n", env->space.dx);
     Log("    dk: %g %g %g\n", env->space.dkx, env->space.dky, env->space.dkz);
 
@@ -97,6 +100,7 @@ void ic_init_test1D(struct env *env)
     env->state.psi = (fftw_complex*) fftw_malloc(sizeof(*env->state.psi) * N);
     env->state.phi = (fftw_complex*) fftw_malloc(sizeof(*env->state.phi) * N);
     env->state.rho = (fftw_complex*) fftw_malloc(sizeof(*env->state.rho) * N);
+
 }
 
 //==============================================================================
@@ -108,15 +112,17 @@ void ic_test1D(struct env *env)
 
     Log("Creating test1D initial conditions...\n");
 
+    const double frac = 1./2.7;
     for (x=0; x < env->space.Nx; x++)
     {
-        double rho = env->cosmo.rho_crit * exp(-30 * pow(env->space.xmin + x*env->space.dx,2) / pow(env->space.xmax-env->space.xmin,2));
+        double rho = env->cosmo.rho_crit * (frac*env->space.Nx < x && x < (1-frac)*env->space.Nx);
+        //double rho = env->cosmo.rho_crit * exp(-30 * pow(env->space.xmin + x*env->space.dx,2) / pow(env->space.xmax-env->space.xmin,2));
 
 //      if (x < env->space.Nx/8 || x > env->space.Nx - (env->space.Nx / 8))
 //          rho = 0;
 
         env->state.psi[x][0] = sqrt(rho);
-        //fprintf(stderr, "%f\n", s->psi[x][0]);
+        //fprintf(stderr, "%f\n", env->state.psi[x][0]);
 
         //s->psi[x][0] = cos(2*M_PI * x/sp->Nx);
         //s->psi[x][0] = 1e-5 * cos(2*M_PI * x/L);
@@ -128,6 +134,18 @@ void ic_test1D(struct env *env)
         env->state.rho[x][0] = rho;
         env->state.rho[x][1] = 0;
     }
+    env->consts.in.c = 0.1161270408e27;
+    env->consts.in.H0 = .09032202799;
+    env->consts.in.G  = 1;
+
+    env->consts.in.hbar = 10;
+    env->bec.m = 1;
+
+    env->drift_exp = env->consts.in.hbar / env->bec.m / 2;
+    env->kick_exp  = env->bec.m / env->consts.in.hbar;
+
+    env->dt = 1e-4; // * (1. / sqrt(env->consts.in.G * 1 /*rho*/ ));
+    env->opts.tmax = 100000;
 }
 
 //==============================================================================
@@ -254,8 +272,8 @@ void drift(const double dt, struct env * const env, const struct plans *plans)
 
         const long double c = cosl(-env->drift_exp * k2 * dt);
         const long double s = sinl(-env->drift_exp * k2 * dt);
-        const long double p0 = env->state.psi[idx][0] / sqrt(env->state.N);
-        const long double p1 = env->state.psi[idx][1] / sqrt(env->state.N);
+        const long double p0 = env->state.psi[idx][0];  /// sqrt(env->state.N);
+        const long double p1 = env->state.psi[idx][1]; // / sqrt(env->state.N);
 
         env->state.psi[idx][0] = c*p0 - s*p1;
         env->state.psi[idx][1] = c*p1 + s*p0;
@@ -265,8 +283,6 @@ void drift(const double dt, struct env * const env, const struct plans *plans)
 
         idx++;
     }}
-
-    //write_state(env);
 
     double rho_avg = 0;
     env->rho_max = 0;
@@ -281,8 +297,8 @@ void drift(const double dt, struct env * const env, const struct plans *plans)
         #pragma omp for reduction(+:rho_avg)
         for (idx=0; idx < env->state.N; idx++)
         {
-            env->state.psi[idx][0] /= sqrt(env->state.N);
-            env->state.psi[idx][1] /= sqrt(env->state.N);
+            env->state.psi[idx][0] /= (env->state.N);
+            env->state.psi[idx][1] /= (env->state.N);
 
             //double mag2 = pow(env->state.psi[idx][0],2) + pow(env->state.psi[idx][1],2);
             //fprintf(stderr, "%ld %.20f %.20f\n", idx, mag2, env->state.rho[idx][0]);
@@ -384,10 +400,10 @@ void gravity(struct env * const env, const struct plans *plans)
            + pow(jo*env->space.dky,2)
            + pow(ko*env->space.dkz,2);
 
-        if (k2 != 0) //idx != idx_center)
+        if (k2 != 0)
         {
-            env->state.phi[idx][0] = env->state.rho[idx][0] / k2; // / (env->state.N);
-            env->state.phi[idx][1] = env->state.rho[idx][1] / k2; // / (env->state.N);
+            env->state.phi[idx][0] = env->state.rho[idx][0] / k2;
+            env->state.phi[idx][1] = env->state.rho[idx][1] / k2;
             //fprintf(stderr, "phi %g\n", env->state.phi[idx][0]);
         }
         else
@@ -442,6 +458,8 @@ int main(int argc, char **argv)
     env.opts.dt = 0.1 * 0.013410;
     env.opts.tmax = env.opts.dt * 10000;
 
+    env.opts.tmax = 1000;
+
     env.cosmo.a_start = 1;
     env.cosmo.H0 = 0.70;
     env.cosmo.omega_m = 0.279;
@@ -465,7 +483,6 @@ int main(int argc, char **argv)
 #endif
 
     //ic_init_test1D(&env);
-
     ic_init_spherical_collapse(&env);
 
     #pragma omp parallel for 
@@ -502,7 +519,8 @@ int main(int argc, char **argv)
     double H2 = pow(env.cosmo.H0, 2)
              * (env.cosmo.omega_v + ((((env.cosmo.omega_r / a) + env.cosmo.omega_m) / a + env.cosmo.omega_k) / a / a));
 
-    env.cosmo.rho_crit = 3*H2 / (8*M_PI);
+    //XXX
+    //env.cosmo.rho_crit = 3*H2 / (8*M_PI);
 
 #if 0
     if (read_grafic("graficICs/128/level0", &env) != 0)
@@ -513,7 +531,6 @@ int main(int argc, char **argv)
 #endif
 
     //ic_test1D(&env);
-
     ic_spherical_collapse(&env);
 
     //env.cosmo.m = 1;
@@ -563,7 +580,7 @@ int main(int argc, char **argv)
 
     for (t=0, step=0; t < env.opts.tmax; t += env.dt)
     {
-        Log("Time %8.4g  Step %i\n", t, step+1);
+        Log("Time %8.4g  Step %i  dt %8.4g\n", t, step+1, env.dt);
 
         /* XXX: Be careful here to change drift_exp at the right time.
          * Shouldn't do this before a complete timestep is finished */
@@ -575,27 +592,33 @@ int main(int argc, char **argv)
         
         //fprintf(stderr, "%f %f\n", env.dt, env.kick_exp * M_PI_4);
         //fprintf(stderr, "%f %f\n", env.dt, env.drift_exp * M_PI_4);
+
+        /* Check time step upper bound */
         assert(env.kmax2 * env.drift_exp * env.dt/2 <= M_PI_4);
+
+        /* Check time step lower bound */
         //assert(env.kick_exp * env.dt <= M_PI_4);
 
         drift(env.dt/2, &env, &plans);
 
-#if 1
         if (t >= env.opts.dt * (step+1))
         {
+            //write_state(&env);
+
             step++;
             t = step * env.opts.dt;
 
+#if 1
             Log("rho_min is %.8g\n", env.rho_min);
             Log("rho_max is %.8g\n", env.rho_max);
             Log("rho_avg is %.8g\n", env.rho_avg);
-            capture_image_log(-2, 6, cmap_tipsy, &env, &fb);
+            capture_image_log(-2, 3, cmap_tipsy, &env, &fb);
             //capture_image_log(1, 10*env.rho_max, cmap_tipsy, &env, &fb);
             //capture_image(&space, &state, &fb);
             write_image(&fb, "/tmp/becon.%05i.rho.png", step);
             //write_ascii_rho(&env, "/tmp/becon.%05i.rho", step);
-        }
 #endif
+        }
 
         if (env.opts.with_gravity)
         {
@@ -616,7 +639,6 @@ int main(int argc, char **argv)
         }
 #endif
 
-        //write_state(&env);
     }
 
 shutdown:
