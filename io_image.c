@@ -119,6 +119,8 @@ int capture_image_log(double min, double max, cmap_t cmap, struct env *env, stru
         size_t o = iy * fb->width + ix;
 
         double q = pow(env->state.psi[idx][0],2) + pow(env->state.psi[idx][1],2);
+        //q = fabs(env->state.phi[idx][0]);
+        //fprintf(stderr, "%g\n", q);
 
         q /= env->cosmo.rho_crit;
         double v = q==0 ? 0 : (log10(q) - min) / (max - min);

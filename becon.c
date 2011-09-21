@@ -19,35 +19,8 @@
 #include "cmap.h"
 
 #include "ic_spherical_collapse.h"
+#include "ic_infinite_sheet.h"
 
-inline int imin(int a, int b)
-{
-    if (a < b) return a;
-    return b;
-}
-
-inline int imax(int a, int b)
-{
-    if (a > b) return a;
-    return b;
-}
-
-inline double MIN(double a, double b)
-{
-    if (a < b) return a;
-    return b;
-}
-
-inline double MAX(double a, double b)
-{
-    if (a > b) return a;
-    return b;
-}
-
-inline double cmag2(fftw_complex a)
-{
-    return pow(a[0],2) + pow(a[1],2);
-}
 
 
 //==============================================================================
@@ -69,6 +42,8 @@ void ic_init_test1D(struct env *env)
     env->space.Ny = 1;
     env->space.Nz = 1;
 
+    env->space.Nmax = MAX(env->space.Nx, MAX(env->space.Ny, env->space.Nz));
+
     env->space.dx = 1; //(env->space.xmax-env->space.xmin) / env->space.Nx;
 
     env->space.xmin = -env->space.dx * env->space.Nx/2;
@@ -78,18 +53,18 @@ void ic_init_test1D(struct env *env)
     env->space.zmin = 0.0;
     env->space.zmax = 0.0;
 
-    env->space.dkx = fabs(env->space.dx) != 0 ? 2*M_PI/(env->space.dx * env->space.Nx) : 0;
-    env->space.dky = fabs(env->space.dx) != 0 ? 2*M_PI/(env->space.dx * env->space.Ny) : 0;
-    env->space.dkz = fabs(env->space.dx) != 0 ? 2*M_PI/(env->space.dx * env->space.Nz) : 0;
+    env->space.dk = fabs(env->space.dx) != 0 ? 2*M_PI/(env->space.dx * env->space.Nmax) : 0;
+    //env->space.dk = fabs(env->space.dx) != 0 ? 2*M_PI/(env->space.dx * env->space.Ny) : 0;
+    //env->space.dk = fabs(env->space.dx) != 0 ? 2*M_PI/(env->space.dx * env->space.Nz) : 0;
 
-    env->kmax2 = pow((env->space.Nx>>1)*env->space.dkx,2)
-               + pow((env->space.Ny>>1)*env->space.dky,2)
-               + pow((env->space.Nz>>1)*env->space.dkz,2);
+    env->kmax2 = pow((env->space.Nx>>1)*env->space.dk,2)
+               + pow((env->space.Ny>>1)*env->space.dk,2)
+               + pow((env->space.Nz>>1)*env->space.dk,2);
 
     //Log("dt: %g\n", dt);
     Log("    kmax2: %g\n", env->kmax2);
     Log("    dx: %g\n", env->space.dx);
-    Log("    dk: %g %g %g\n", env->space.dkx, env->space.dky, env->space.dkz);
+    Log("    dk: %g\n", env->space.dk);
 
     size_t N = env->space.Nx * env->space.Ny * env->space.Nz;
 
@@ -227,9 +202,9 @@ inline void kxyz(int i, struct space *s, double *x, double *y, double *z)
     int iz = i / (s->Nx * s->Ny); i -= iz * (s->Nx * s->Ny);
     int iy = i / s->Nx;           i -= iy * s->Nx;
     int ix = i;
-    *x = (s->dkx * ix);
-    *y = (s->dky * iy);
-    *z = (s->dkz * iz);
+    *x = (s->dk * ix);
+    *y = (s->dk * iy);
+    *z = (s->dk * iz);
 }
 
 //==============================================================================
@@ -262,9 +237,9 @@ void drift(const double dt, struct env * const env, const struct plans *plans)
 
         //fprintf(stderr, "%ld %i %i %i\n", idx, io, jo, ko);
 
-        k2 = pow(io*env->space.dkx,2)
-           + pow(jo*env->space.dky,2)
-           + pow(ko*env->space.dkz,2);
+        k2 = pow(io*env->space.dk,2)
+           + pow(jo*env->space.dk,2)
+           + pow(ko*env->space.dk,2);
 
         //k2 /= 2;
 
@@ -352,7 +327,7 @@ void kick(const double dt, const struct env *env)
 //==============================================================================
 //                                   gravity
 //==============================================================================
-void gravity(struct env * const env, const struct plans *plans)
+void gravity_periodic(struct env * const env, const struct plans *plans)
 {
     size_t idx, idx_center;
     int32_t i,j,k;
@@ -396,9 +371,9 @@ void gravity(struct env * const env, const struct plans *plans)
         const int32_t jo = j - env->space.Ny*(j > (env->space.Ny>>1));
         const int32_t ko = k - env->space.Nz*(k > (env->space.Nz>>1));
 
-        k2 = pow(io*env->space.dkx,2)
-           + pow(jo*env->space.dky,2)
-           + pow(ko*env->space.dkz,2);
+        k2 = pow(io*env->space.dk,2)
+           + pow(jo*env->space.dk,2)
+           + pow(ko*env->space.dk,2);
 
         if (k2 != 0)
         {
@@ -438,12 +413,123 @@ void gravity(struct env * const env, const struct plans *plans)
 #endif
 }
 
+void gravity_vacuum(struct env * const env, const struct plans *plans)
+{
+    static int first_time = 1;
+    size_t idx, idx_center, vidx;
+    int32_t i,j,k;
+
+    double prob_tot = 0;
+    memset(env->state.rho, 0, sizeof(*env->state.rho) * env->state.vN);
+
+    #pragma omp parallel for reduction(+:prob_tot) private(j,i,idx, vidx)
+    for (k=0; k < env->space.Nz; k++) { idx = k * env->space.Nx * env->space.Ny;
+    for (j=0; j < env->space.Ny; j++) { vidx = k * env->space.vNx * env->space.vNy + j * env->space.vNx;
+    for (i=0; i < env->space.Nx; i++)
+    {
+        env->state.rho[vidx][0] = cmag2(env->state.psi[idx]);
+        env->state.rho[vidx][1] = 0;
+
+        env->state.phi[idx][0] = 0;
+        env->state.phi[idx][1] = 0;
+        prob_tot += env->state.rho[vidx][0];
+
+        vidx++;
+        idx++;
+    }}}
+
+//  struct frame_buffer fb;
+//  alloc_frame_buffer(&fb, imin(256, env->space.vNx), imin(256, env->space.vNy));
+//  capture_image_log(10, 12, cmap_tipsy, env, &fb);
+//  write_image(&fb, "/tmp/becon.%05i.rho.png", 10);
+
+//  if (!first_time) exit(2);
+//  first_time = 0;
+    
+
+#if 0
+    if (step % 100 == 0)
+    {
+        capture_image(&space, &state, &fb);
+        write_image("frames/becon.%05i.phi.png", step, &fb);
+    }
+#endif
+
+#if 1
+    idx_center = env->state.N;
+    idx_center >>= env->space.Nx > 1;
+    idx_center >>= env->space.Ny > 1;
+    idx_center >>= env->space.Nz > 1;
+
+    //Log("Total Probability is %f\n", prob_tot);
+    fftw_execute(plans->rho_f);
+#if 1
+    #pragma omp parallel for private(j,i,vidx)
+    for (k=0; k < env->space.vNz; k++) { vidx = k * env->space.vNx * env->space.vNy;
+    for (j=0; j < env->space.vNy; j++) 
+    for (i=0; i < env->space.vNx; i++)
+    {
+        double k2;
+
+        const int32_t io = i;
+        const int32_t jo = j;
+        const int32_t ko = k;
+
+        k2 = pow(io*env->space.dk,2)
+           + pow(jo*env->space.dk,2)
+           + pow(ko*env->space.dk,2);
+
+        //if (k2 != 0)
+        if (1)
+        {
+            env->state.rho[vidx][0] *= env->state.S[vidx][0];
+            env->state.rho[vidx][1] *= env->state.S[vidx][1];
+            //fprintf(stderr, "- %g\n", env->state.S[vidx][0]);
+        }
+        else
+        {
+            /* Treating k2==0 by setting phi=0 subtracts off the mean density */
+            env->state.rho[vidx][0] = 0;
+            env->state.rho[vidx][1] = 0;
+        }
+
+        vidx++;
+    }}
+#endif
+    fftw_execute(plans->rho_b);
+    //fftw_execute(plans->vphi_b);
+
+    env->phi_max = 0;
+    {
+        double phi_max = 0;
+        #pragma omp for private(j,i,idx,vidx)
+        for (k=0; k < env->space.Nz; k++) { idx = k * env->space.Nx * env->space.Ny;
+        for (j=0; j < env->space.Ny; j++) { vidx = k * env->space.vNx * env->space.vNy + j * env->space.vNx;
+        for (i=0; i < env->space.Nx; i++)
+        {
+            env->state.phi[idx][0] = env->state.rho[vidx][0] / env->state.vN;
+            env->state.phi[idx][1] = env->state.rho[vidx][1] / env->state.vN;
+            //phi_max = MAX(phi_max, env->state.phi[idx][0]);
+
+            idx++;
+            vidx++;
+        }}}
+
+        #pragma omp critical
+        {
+            //env->phi_max = MAX(env->phi_max, phi_max);
+        }
+    }
+#endif
+}
+
 //==============================================================================
 //                                     main
 //==============================================================================
 int main(int argc, char **argv)
 {
-    size_t idx;
+    size_t idx, vidx;
+    int32_t i,j,k;
     size_t nthreads = omp_get_num_threads();
     struct env env;
     struct plans plans;
@@ -452,13 +538,16 @@ int main(int argc, char **argv)
     double t;
     int step;
 
+    void (*gravity)(struct env * const, const struct plans *) = NULL;
+
     env.opts.with_gravity = 1;
+    env.opts.with_vacuum = 1;
     //env.opts.dt = 0.01 * 0.861522;
     //env.opts.dt = 0.01 * 0.094638;
     env.opts.dt = 0.1 * 0.013410;
     env.opts.tmax = env.opts.dt * 10000;
 
-    env.opts.tmax = 1000;
+    env.opts.tmax = 100000;
 
     env.cosmo.a_start = 1;
     env.cosmo.H0 = 0.70;
@@ -484,6 +573,7 @@ int main(int argc, char **argv)
 
     //ic_init_test1D(&env);
     ic_init_spherical_collapse(&env);
+    //ic_init_infinite_sheet(&env);
 
     #pragma omp parallel for 
     for (idx=0; idx < env.state.N; idx++)
@@ -494,8 +584,8 @@ int main(int argc, char **argv)
         env.state.phi[idx][0] = 0;
         env.state.phi[idx][1] = 0;
 
-        env.state.rho[idx][0] = 0;
-        env.state.rho[idx][1] = 0;
+        //env.state.rho[idx][0] = 0;
+        //env.state.rho[idx][1] = 0;
     }
 
     alloc_frame_buffer(&fb, imin(256, env.space.Nx), imin(256, env.space.Ny));
@@ -507,13 +597,28 @@ int main(int argc, char **argv)
     Log("Creating plans...\n");
 #define PLAN(var, dir) \
     fftw_plan_dft_3d(env.space.Nx, env.space.Ny, env.space.Nz,env.state. var,env.state. var, dir, FFTW_MEASURE)
+#define vPLAN(var, dir) \
+    fftw_plan_dft_3d(env.space.vNx, env.space.vNy, env.space.vNz,env.state. var,env.state. var, dir, FFTW_MEASURE)
 
     plans.psi_f = PLAN(psi, FFTW_FORWARD);
     plans.phi_f = PLAN(phi, FFTW_FORWARD);
-    plans.rho_f = PLAN(rho, FFTW_FORWARD);
     plans.psi_b = PLAN(psi, FFTW_BACKWARD);
     plans.phi_b = PLAN(phi, FFTW_BACKWARD);
-    plans.rho_b = PLAN(rho, FFTW_BACKWARD);
+
+    if (env.opts.with_vacuum)
+    {
+        plans.rho_f  = vPLAN(rho, FFTW_FORWARD);
+        plans.rho_b  = vPLAN(rho, FFTW_BACKWARD);
+        plans.vphi_b = vPLAN(vphi, FFTW_BACKWARD);
+        plans.S_f    = vPLAN(S, FFTW_FORWARD);
+        //plans.vphi_b = fftw_plan_dft_3d(env.space.vNx, env.space.vNy, env.space.vNz, env.state.vphi,env.state.vphi, FFTW_BACKWARD, FFTW_MEASURE);
+        //plans.S_f    = fftw_plan_dft_3d(env.space.vNx, env.space.vNy, env.space.vNz, env.state.S,   env.state.S,    FFTW_FORWARD,  FFTW_MEASURE);
+    }
+    else
+    {
+        plans.rho_f = PLAN(rho, FFTW_FORWARD);
+        plans.rho_b = PLAN(rho, FFTW_BACKWARD);
+    }
 
     double a = env.cosmo.a_start;
     double H2 = pow(env.cosmo.H0, 2)
@@ -532,6 +637,28 @@ int main(int argc, char **argv)
 
     //ic_test1D(&env);
     ic_spherical_collapse(&env);
+    //ic_infinite_sheet(&env);
+
+    if (env.opts.with_vacuum)
+    {
+        for (k=0; k < env.space.vNz; k++) { idx = k * env.space.vNx * env.space.vNy;
+        for (j=0; j < env.space.vNy; j++) 
+        for (i=0; i < env.space.vNx; i++)
+        {
+            const int32_t io = i - env.space.vNx*(i > (env.space.vNx>>1));
+            const int32_t jo = j - env.space.vNy*(j > (env.space.vNy>>1));
+            const int32_t ko = k - env.space.vNz*(k > (env.space.vNz>>1));
+
+            env.state.S[idx][0] = 1.0 / sqrt(pow(io*env.space.dx,2)
+                                           + pow(jo*env.space.dx,2)
+                                           + pow(ko*env.space.dx,2) + pow(env.space.dx/2,2));
+            env.state.S[idx][1] = 0;
+
+            idx++;
+        }}
+
+        fftw_execute(plans.S_f);
+    }
 
     //env.cosmo.m = 1;
     //double v = sqrt(env.cosmo.rho_crit) * pow(env.space.dx,2) * env.cosmo.m;
@@ -564,19 +691,33 @@ int main(int argc, char **argv)
     //capture_image(&space, &state, &fb);
     //write_image("frames/becon.%05i.phi.png", 0, &fb);
 
-    capture_image_log(-1, 0, cmap_tipsy, &env, &fb);
+    capture_image_log(-1, 5, cmap_tipsy, &env, &fb);
     write_image(&fb, "/tmp/becon.%05i.rho.png", 0);
 
     //goto shutdown;
 
     //write_tipsy_grid(&env, "/tmp/becon.grid.bin");
 
+
+    if (env.opts.with_vacuum)
+    {
+        gravity = gravity_vacuum;
+    }
+    else
+    {
+        gravity = gravity_periodic;
+    }
+
+
     if (env.opts.with_gravity)
     {
         gravity(&env, &plans);
     }
 
-    env.opts.dt = env.dt * 10;
+    env.opts.dt = env.dt * 100;
+//  capture_image_log(-12, 12, cmap_tipsy, &env, &fb);
+//  write_image(&fb, "/tmp/becon.%05i.rho.png", 1);
+//  exit(1);
 
     for (t=0, step=0; t < env.opts.tmax; t += env.dt)
     {
@@ -589,7 +730,7 @@ int main(int argc, char **argv)
 
         //env.dt = M_PI * env.cosmo.a / (6 * env.cosmo.omega_m * env.eta * env.phi_max);
         //
-        
+
         //fprintf(stderr, "%f %f\n", env.dt, env.kick_exp * M_PI_4);
         //fprintf(stderr, "%f %f\n", env.dt, env.drift_exp * M_PI_4);
 
@@ -612,7 +753,7 @@ int main(int argc, char **argv)
             Log("rho_min is %.8g\n", env.rho_min);
             Log("rho_max is %.8g\n", env.rho_max);
             Log("rho_avg is %.8g\n", env.rho_avg);
-            capture_image_log(-2, 3, cmap_tipsy, &env, &fb);
+            capture_image_log(2, 7, cmap_tipsy, &env, &fb);
             //capture_image_log(1, 10*env.rho_max, cmap_tipsy, &env, &fb);
             //capture_image(&space, &state, &fb);
             write_image(&fb, "/tmp/becon.%05i.rho.png", step);
@@ -658,6 +799,12 @@ shutdown:
     fftw_free(env.state.psi);
     fftw_free(env.state.phi);
     fftw_free(env.state.rho);
+
+    if (env.opts.with_vacuum)
+    {
+        fftw_free(env.state.S);
+        fftw_free(env.state.vphi);
+    }
 
     free_frame_buffer(&fb);
 
