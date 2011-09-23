@@ -23,7 +23,8 @@ LDFLAGS+=-lfftw3_omp $(FFTW_LDFLAGS) -lgomp
 CFLAGS+=-I/opt/local/include
 LDFLAGS+=-L/opt/local/lib -ljpeg
 
-OBJS=becon.o io_grafic.o log.o io_image.o frame_buffer.o cmap.o io_arrays.o io_tipsy.o ic_spherical_collapse.o ic_infinite_sheet.o
+OBJS=becon.o io_grafic.o log.o io_image.o frame_buffer.o cmap.o io_arrays.o io_tipsy.o ic_spherical_collapse.o ic_infinite_sheet.o \
+	analysis.o matrix.o
 
 all: becon
 

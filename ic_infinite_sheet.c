@@ -1,14 +1,9 @@
-#include <assert.h>
 #include <math.h>
-#include "becon.h"
 #include "ic_spherical_collapse.h"
 #include "log.h"
 
-int ic_init_spherical_collapse(struct env *env)
+int ic_init_infinite_sheet(struct env *env)
 {
-    size_t idx, vidx;
-    int32_t i,j,k;
-
     Log("Preparing spherical collapse ICs...\n");
 
     env->cosmo.a_start = 1;
@@ -19,27 +14,12 @@ int ic_init_spherical_collapse(struct env *env)
     env->cosmo.omega_k = 1 - (env->cosmo.omega_m + env->cosmo.omega_v + env->cosmo.omega_r);
     env->cosmo.rho_crit = 1;
 
-    env->space.Nx = 32;
-    env->space.Ny = 32;
-    env->space.Nz = 32;
+    env->space.Nx = 64;
+    env->space.Ny = 64;
+    env->space.Nz = 1;
     env->space.Nmax = MAX(env->space.Nx, MAX(env->space.Ny, env->space.Nz));
 
-    env->space.vNx = env->space.Nx;
-    env->space.vNy = env->space.Ny;
-    env->space.vNz = env->space.Nz;
-
-    if (env->opts.with_vacuum)
-    {
-        if (env->space.vNx > 1) env->space.vNx *= 2;
-        if (env->space.vNy > 1) env->space.vNy *= 2;
-        if (env->space.vNz > 1) env->space.vNz *= 2;
-    }
-    
-    env->space.dx = .01; //2*M_PI / env->space.Nmax / env->space.dk;
-    env->space.dk = 2*M_PI / (env->space.dx * env->space.Nmax);
-
-    assert(env->space.dx != 0);
-    assert(env->space.dk != 0);
+    env->space.dx = 1. / env->space.Nz;
 
     env->space.xmin = -env->space.dx * env->space.Nx/2;
     env->space.xmax = -env->space.xmin;
@@ -48,6 +28,7 @@ int ic_init_spherical_collapse(struct env *env)
     env->space.zmin = -env->space.dx * env->space.Nz/2;
     env->space.zmax = -env->space.zmin;
 
+    env->space.dk = fabs(env->space.dx) != 0 ? 2*M_PI/(env->space.dx * env->space.Nmax) : 0;
     //env->space.dky = fabs(env->space.dx) != 0 ? 2*M_PI/(env->space.dx * env->space.Ny) : 0;
     //env->space.dkz = fabs(env->space.dx) != 0 ? 2*M_PI/(env->space.dx * env->space.Nz) : 0;
 
@@ -59,44 +40,30 @@ int ic_init_spherical_collapse(struct env *env)
 
     //Log("dt: %g\n", dt);
     Log("    dx: %g\n", env->space.dx);
-    Log("    dk: %g\n", env->space.dk);
-    Log(" kmax2: %g\n", env->kmax2);
+    Log("    dk: %g %g %g\n", env->space.dk);
 
-    size_t N  = env->space.Nx * env->space.Ny * env->space.Nz;
-    size_t vN = env->space.vNx * env->space.vNy * env->space.vNz;
+    size_t N = env->space.Nx * env->space.Ny * env->space.Nz;
 
-    env->state.N  = N;
-    env->state.vN = vN;
+    env->state.N = N;
 
     Log("    %ld grid cells.\n", N);
 
     env->state.psi = (fftw_complex*) fftw_malloc(sizeof(*env->state.psi) * N);
     env->state.phi = (fftw_complex*) fftw_malloc(sizeof(*env->state.phi) * N);
-    env->state.rho = (fftw_complex*) fftw_malloc(sizeof(*env->state.rho) * vN); /* vN *is* correct */
-
-    if (env->opts.with_vacuum)
-    {
-        env->state.vphi = (fftw_complex*) fftw_malloc(sizeof(*env->state.vphi) * vN);
-        env->state.S   = (fftw_complex*) fftw_malloc(sizeof(*env->state.S) * vN);
-    }
-    else
-    {
-        env->state.S   = NULL;
-    }
-
+    env->state.rho = (fftw_complex*) fftw_malloc(sizeof(*env->state.rho) * N);
     return 0;
 }
 
-int ic_spherical_collapse(struct env *env)
+int ic_infinite_sheet(struct env *env)
 {
     int32_t i,j,k;
     size_t idx=0;
 
     struct space *sp = &env->space;
 
-    double R = sp->Nx/2 * sp->dx;
+    double R = sp->Nx/4 * sp->dx;
 
-    const double rho = 1e3;
+    const double rho = 1e1;
 
     for (k=0; k < sp->Nz; k++)
     for (j=0; j < sp->Ny; j++)
@@ -106,15 +73,12 @@ int ic_spherical_collapse(struct env *env)
         double y0 = j*sp->dx + sp->ymin;
         double z0 = k*sp->dx + sp->zmin;
 
-        double r = sqrt(x0*x0 + y0*y0 + z0*z0);
-
-        if (0.85*R < r && r < R)
-        //if (r < R)
+        if (i == sp->Nx / 2)
         {
-            //env->state.rho[idx][0] = rho;
-            //env->state.rho[idx][1] = 0;
+            env->state.rho[idx][0] = rho;
+            env->state.rho[idx][1] = 0;
 
-            env->state.psi[idx][0] = sqrt(rho); // * pow(R-r,2));
+            env->state.psi[idx][0] = sqrt(rho);
             env->state.psi[idx][1] = 0;
 
             env->state.phi[idx][0] = 0;
@@ -122,8 +86,8 @@ int ic_spherical_collapse(struct env *env)
         }
         else
         {
-            //env->state.rho[idx][0] = 0;
-            //env->state.rho[idx][1] = 0;
+            env->state.rho[idx][0] = 0;
+            env->state.rho[idx][1] = 0;
 
             env->state.psi[idx][0] = 0;
             env->state.psi[idx][1] = 0;
@@ -142,14 +106,13 @@ int ic_spherical_collapse(struct env *env)
     //env->consts.in.hbar = 0.00001290886701;
     //env->bec.m = 1e-4;
 
-    env->consts.in.hbar = .010;
+    env->consts.in.hbar = .10;
     env->bec.m = 1;
 
     env->drift_exp = env->consts.in.hbar / env->bec.m / 2;
     env->kick_exp  = env->bec.m / env->consts.in.hbar;
 
     env->dt = 1e-3 * (1. / sqrt(env->consts.in.G * rho));
-    //env->dt = 1e-0 * 0.999 * M_PI_2 / env->kmax2 / env->drift_exp;
 
     fprintf(stderr, "%g should be < %g\n", 
         env->consts.in.hbar / env->bec.m,

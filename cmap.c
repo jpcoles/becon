@@ -52,8 +52,17 @@ void cmap_tipsy(double v, int *r, int *g, int *b)
     if      ( v < 1 ) { *r=0;           *g=0;               *b=255*v;       }
     else if ( v < 2 ) { *r=255*(v-1.0); *g=0;               *b=255;         }
     else if ( v < 3 ) { *r=255;         *g=0;               *b=255*(3.0-v); }
-    else if ( v < 5 ) { *r=255;         *g=255*(v-3.0)*0.5; *b=0;           }
-    else if ( v < 6 ) { *r=255;         *g=255;             *b=255*(v-5.0); }
+    else if ( v < 4 ) { *r=255;         *g=255*(v-3.0)*0.5; *b=0;           }
+    else if ( v < 5 ) { *r=255;         *g=255;             *b=255*(v-5.0); }
     else              { *r=255;         *g=255;             *b=255;         }
 }
 
+void cmap_grey(double v, int *r, int *g, int *b)
+{
+    if ( v < 0.0 ) v = 0.0;
+    else if ( v > 1.0 ) v = 1.0;
+
+    *r =
+    *g =
+    *b = 255*v;
+}
