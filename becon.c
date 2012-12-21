@@ -360,7 +360,7 @@ void gravity_periodic(struct env * const env, const struct plans *plans)
     idx_center >>= env->space.Ny > 1;
     idx_center >>= env->space.Nz > 1;
 
-    //Log("Total Probability is %f\n", prob_tot);
+    Log("Total Probability is %f\n", prob_tot);
     fftw_execute(plans->rho_f);
     #pragma omp parallel for private(j,i,idx)
     for (k=0; k < env->space.Nz; k++) { idx = k * env->space.Nx * env->space.Ny;
@@ -514,10 +514,10 @@ int main(int argc, char **argv)
     void (*gravity)(struct env * const, const struct plans *) = NULL;
 
     env.opts.with_gravity = 1;
-    env.opts.with_vacuum = 1;
+    env.opts.with_vacuum = 0;
     //env.opts.dt = 0.01 * 0.861522;
     //env.opts.dt = 0.01 * 0.094638;
-    env.opts.dt = 0.1 * 0.013410;
+    env.opts.dt = 1.0 * 0.013410;
     env.opts.tmax = env.opts.dt * 10000;
 
     env.opts.tmax = 100000;
@@ -531,12 +531,13 @@ int main(int argc, char **argv)
 
     env.consts.si.c = 3e8;  // [m/s]
     env.consts.si.hbar = 6.58211928e-16;  // [eV s]
-    env.consts.si.H0 = 0.73 / 3.08568025e19; // [s^-1]
+    env.consts.si.H0 = env.cosmo.H0 / 3.08568025e19; // [s^-1]
     env.consts.si.G  = 6.6738480e-11; // [m^3 kg^-1 s^-2]
 
     env.bec.m = 2.5e-22 / pow(env.consts.si.c,2);   // [eV / c^2]
+    env.bec.m = 2e3 / pow(env.consts.si.c,2);   // [eV / c^2]
 
-#if 0
+#if 1
     if (alloc_grafic("graficICs/128/level0", &env) != 0)
     {
         Log("Failed to read input.\n");
@@ -545,7 +546,7 @@ int main(int argc, char **argv)
 #endif
 
     //ic_init_test1D(&env);
-    ic_init_spherical_collapse(&env);
+    //ic_init_spherical_collapse(&env);
     //ic_init_infinite_sheet(&env);
 
     #pragma omp parallel for 
@@ -595,14 +596,16 @@ int main(int argc, char **argv)
         plans.rho_b = PLAN(rho, FFTW_BACKWARD);
     }
 
+#if 0
     double a = env.cosmo.a_start;
     double H2 = pow(env.cosmo.H0, 2)
              * (env.cosmo.omega_v + ((((env.cosmo.omega_r / a) + env.cosmo.omega_m) / a + env.cosmo.omega_k) / a / a));
 
     //XXX
-    //env.cosmo.rho_crit = 3*H2 / (8*M_PI);
+    env.cosmo.rho_crit = 3*H2 / (8*M_PI);
+#endif
 
-#if 0
+#if 1
     if (read_grafic("graficICs/128/level0", &env) != 0)
     {
         Log("Failed to load input.\n");
@@ -611,7 +614,7 @@ int main(int argc, char **argv)
 #endif
 
     //ic_test1D(&env);
-    ic_spherical_collapse(&env);
+    //ic_spherical_collapse(&env);
     //ic_infinite_sheet(&env);
 
     if (env.opts.with_vacuum)
@@ -658,8 +661,6 @@ int main(int argc, char **argv)
     //Log("LambdaDB = %g\n", env.cosmo.h_m / v);
 
 
-
-
     assert(env.space.Nx == 1 || (env.space.Nx & 1) == 0);
     assert(env.space.Ny == 1 || (env.space.Ny & 1) == 0);
     assert(env.space.Nz == 1 || (env.space.Nz & 1) == 0);
@@ -671,8 +672,9 @@ int main(int argc, char **argv)
     //capture_image(&space, &state, &fb);
     //write_image("frames/becon.%05i.phi.png", 0, &fb);
 
-    capture_image_log(-1, 5, cmap_tipsy, &env, &fb);
+    capture_image_log(-5, 5, cmap_tipsy, &env, &fb);
     write_image(&fb, "/tmp/becon.%05i.rho.png", 0);
+    //write_matrix(&rrho, "/tmp/becon.%05i.rho.txt", 0);
 
     //goto shutdown;
 
@@ -694,21 +696,28 @@ int main(int argc, char **argv)
         gravity(&env, &plans);
     }
 
-    env.opts.dt = env.dt * 100;
+    //env.opts.dt = env.dt * 100;
+    env.dt = env.opts.dt;
 //  capture_image_log(-12, 12, cmap_tipsy, &env, &fb);
 //  write_image(&fb, "/tmp/becon.%05i.rho.png", 1);
 //  exit(1);
 
+    double z = 1/env.cosmo.a - 1;
+    double dz = z / 100;
+    double kmax2 = pow(env.space.Nx,2) + pow(env.space.Ny,2) + pow(env.space.Nz,2);
+    //for (t=0, step=0; z >= 0; z -= dz) 
     for (t=0, step=0; t < env.opts.tmax; t += env.dt)
     {
-        Log("Time %8.4g  Step %i  dt %8.4g\n", t, step+1, env.dt);
+        env.cosmo.a = 1; // / (z+1);
+
+        Log("Time %8.4g  Step %i  dt %8.4g  z %8.4f\n", t, step+1, env.dt, z);
 
         /* XXX: Be careful here to change drift_exp at the right time.
          * Shouldn't do this before a complete timestep is finished */
-        //env.drift_exp = 1. / (2 * env.eta * pow(env.cosmo.a, 2));
-        //env.kick_exp  = 3 * env.cosmo.omega_m * env.eta / (2 * env.cosmo.a);
+        env.drift_exp = 1. / (2 * env.eta * pow(env.cosmo.a, 2));
+        env.kick_exp  = 3 * env.cosmo.omega_m * env.eta / (2 * env.cosmo.a);
 
-        //env.dt = M_PI * env.cosmo.a / (6 * env.cosmo.omega_m * env.eta * env.phi_max);
+        //env.dt = fabs(M_PI * env.cosmo.a / (6 * env.cosmo.omega_m * env.eta * env.phi_max));
         //
 
         //fprintf(stderr, "%f %f\n", env.dt, env.kick_exp * M_PI_4);
@@ -727,6 +736,8 @@ int main(int argc, char **argv)
             gravity(&env, &plans);
         }
 
+        //t += env.dt;
+
         if (t >= env.opts.dt * (step+1))
         {
             //write_state(&env);
@@ -739,16 +750,16 @@ int main(int argc, char **argv)
             Log("rho_max is %.8g\n", env.rho_max);
             Log("rho_avg is %.8g\n", env.rho_avg);
             //capture_image_log(log10(env.rho_max)*0.8, 1.1*log10(env.rho_max), cmap_tipsy, &env, &fb);
-            capture_image_log(7, 12, cmap_grey, &env, &fb);
+            capture_image_log(-1, 1, cmap_tipsy, &env, &fb);
             //capture_image_log(1, 10*env.rho_max, cmap_tipsy, &env, &fb);
             //capture_image(&space, &state, &fb);
             write_image(&fb, "/tmp/becon.%05i.rho.png", step);
             //write_ascii_rho(&env, "/tmp/becon.%05i.rho", step);
 
-            radial_avg_density(&env, &rrho, 0,0,0);
-            radial_avg_potential(&env, &rphi, 0,0,0);
-            write_matrix(&rrho, "/tmp/becon.%05i.rho.txt", step);
-            write_matrix(&rphi, "/tmp/becon.%05i.phi.txt", step);
+//          radial_avg_density(&env, &rrho, 0,0,0);
+//          radial_avg_potential(&env, &rphi, 0,0,0);
+//          write_matrix(&rrho, "/tmp/becon.%05i.rho.txt", step);
+//          write_matrix(&rphi, "/tmp/becon.%05i.phi.txt", step);
 #endif
         }
 

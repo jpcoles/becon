@@ -48,29 +48,25 @@ int alloc_grafic(const char *dirname, struct env *env)
         return 1;
     }
 
-    Log("    Dimensions    %i x %i x %i\n", hdr.np1, hdr.np2, hdr.np3);
-    Log("    Grid size     %f [comoving Mpc]\n", hdr.dx);
-    Log("    Grid offsets  %f %f %f [comoving Mpc]\n", hdr.x1o, hdr.x2o, hdr.x3o);
-    Log("    a start       %f\n", hdr.astart);
-    Log("    omegam        %f\n", hdr.omegam);
-    Log("    omegav        %f\n", hdr.omegav);
-    Log("    H0            %f [km/s/Mpc]\n", hdr.h0);
-
     fclose(fp);
 
     env->cosmo.a_start = hdr.astart;
     env->cosmo.omega_m = hdr.omegam;
     env->cosmo.omega_v = hdr.omegav;
+    env->cosmo.omega_r = 0;
+    env->cosmo.omega_k = 1 - (env->cosmo.omega_m + env->cosmo.omega_v + env->cosmo.omega_r);
     env->cosmo.H0      = hdr.h0;
     env->cosmo.h       = hdr.h0 / 100.;
 
-    env->cosmo.omega_r = 0;
-    env->cosmo.omega_k = 1 - (env->cosmo.omega_m + env->cosmo.omega_v + env->cosmo.omega_r);
+    double H2 = pow(env->cosmo.H0, 2); // * (env->cosmo.omega_v + ((((env->cosmo.omega_r / env->cosmo.a_start) + env->cosmo.omega_m) / env->cosmo.a_start + env->cosmo.omega_k) / env->cosmo.a_start / env->cosmo.a_start));
+    env->cosmo.rho_crit = 3*H2 / (8*M_PI*env->consts.si.G) * (env->bec.m / (env->cosmo.H0 * env->consts.si.hbar));
+    //env->cosmo.rho_crit /= 100000;
 
     env->consts.si.H0 = hdr.h0 / 3.08568025e19;
 
-    double Delta = hdr.dx / env->cosmo.h * 3.08568025e22;
-    env->eta = env->bec.m * pow(Delta,2) * env->consts.si.H0 / env->consts.si.hbar;
+    //double Delta = hdr.dx / env->cosmo.h * 3.08568025e22;
+    double Delta = hdr.dx * 3.08568025e22;
+    env->eta = env->bec.m * pow(Delta,2) * pow(env->consts.si.H0,2) / env->consts.si.hbar;
 
 #if 0
     fprintf(stderr, "dx %e\n", hdr.dx);
@@ -100,6 +96,17 @@ int alloc_grafic(const char *dirname, struct env *env)
     env->state.psi = (fftw_complex*) fftw_malloc(sizeof(*env->state.psi) * env->state.N);
     env->state.phi = (fftw_complex*) fftw_malloc(sizeof(*env->state.phi) * env->state.N);
     env->state.rho = (fftw_complex*) fftw_malloc(sizeof(*env->state.rho) * env->state.N);
+
+    Log("    Dimensions    %i x %i x %i\n", hdr.np1, hdr.np2, hdr.np3);
+    Log("    Grid size     %f [comoving Mpc]\n", hdr.dx);
+    Log("    Grid offsets  %f %f %f [comoving Mpc]\n", hdr.x1o, hdr.x2o, hdr.x3o);
+    Log("    a start       %f\n", hdr.astart);
+    Log("    omegam        %f\n", hdr.omegam);
+    Log("    omegav        %f\n", hdr.omegav);
+    Log("    omegar        %f\n", env->cosmo.omega_r);
+    Log("    omegak        %f\n", env->cosmo.omega_k);
+    Log("    rho_crit      %f\n", env->cosmo.rho_crit);
+    Log("    H0            %f [km/s/Mpc]\n", hdr.h0);
 
     return 0;
 }
@@ -205,9 +212,8 @@ int read_grafic(const char *dirname, struct env *env)
     for (i=0; i < env->state.N; i++)
     {
         arr[i] += 1.0;
+#if 0
         arr[i] *= env->cosmo.rho_crit;
-
-    //a[i] *= 100;
 
         if (arr[i] < 0
 #ifdef isnormal
@@ -219,6 +225,7 @@ int read_grafic(const char *dirname, struct env *env)
             retcode = 3;
             goto cleanup;
         }
+#endif
         env->state.phi[i][0] = 0;
         env->state.phi[i][1] = 0;
 

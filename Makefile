@@ -1,8 +1,10 @@
 FFTW_LDFLAGS=-L/usr/mpi/gcc/openmpi-1.4.3/lib64 -lfftw3 -lm 
 FFTW_CFLAGS=-I/usr/mpi/gcc/openmpi-1.4.3/include
 
-FFTW_LDFLAGS+=-L/usr/local/lib #-lfftw3 -lm 
-FFTW_CFLAGS+=-I/usr/local/include
+#FFTW_LDFLAGS+=-L/usr/local/lib #-lfftw3 -lm 
+#FFTW_CFLAGS+=-I/usr/local/include
+FFTW_LDFLAGS+=-L $(FFTW_LIB)
+FFTW_CFLAGS+=-L $(FFTW_INCLUDE)
 
 #FFTW_LDFLAGS=$(shell PKG_CONFIG_PATH=/opt/fftw/3.2.2/gnu/lib/pkgconfig pkg-config fftw3 --libs)
 #FFTW_CFLAGS=$(shell PKG_CONFIG_PATH=/opt/fftw/3.2.2/gnu/lib/pkgconfig pkg-config fftw3 --cflags)

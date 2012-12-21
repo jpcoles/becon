@@ -122,7 +122,7 @@ int capture_image_log(double min, double max, cmap_t cmap, struct env *env, stru
         //q = fabs(env->state.phi[idx][0]);
         //fprintf(stderr, "%g\n", q);
 
-        q /= env->cosmo.rho_crit;
+        //q /= env->cosmo.rho_crit;
         double v = q==0 ? 0 : (log10(q) - min) / (max - min);
 
         assert(v == 0 || isnormal(v));
