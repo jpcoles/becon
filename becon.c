@@ -534,6 +534,12 @@ int main(int argc, char **argv)
     env.consts.si.H0 = env.cosmo.H0 / 3.08568025e19; // [s^-1]
     env.consts.si.G  = 6.6738480e-11; // [m^3 kg^-1 s^-2]
 
+    env->consts.in.c = 1;
+    env->consts.in.H0 = 1;
+    env->consts.in.G  = 1;
+    env->consts.in.hbar = pow(env.space.dx,2) * 2*M_PI / env.space.Nmax * ;
+    env->bec.m = 1;
+
     env.bec.m = 2.5e-22 / pow(env.consts.si.c,2);   // [eV / c^2]
     env.bec.m = 2e3 / pow(env.consts.si.c,2);   // [eV / c^2]
 

@@ -85,9 +85,9 @@ int alloc_grafic(const char *dirname, struct env *env)
     env->space.Nz = hdr.np3;
     env->space.Nmax = MAX(env->space.Nx, MAX(env->space.Ny, env->space.Nz));
 
-    env->space.dx = 1; //hdr.dx;
-
-    env->space.dk = fabs(env->space.dx) != 0 ? 2*M_PI/(env->space.dx * env->space.Nmax) : 0;
+    env->space.dx = hdr.dx;
+    env->space.dk = fabs(env->space.dx) != 0 ? 2*M_PI/env->space.Nmax : 0;
+    //env->space.dk = fabs(env->space.dx) != 0 ? 2*M_PI/(env->space.dx * env->space.Nmax) : 0;
     //env->space.dk = fabs(env->space.dx) != 0 ? 2*M_PI/(env->space.dx * env->space.Ny) : 0;
     //env->space.dk = fabs(env->space.dx) != 0 ? 2*M_PI/(env->space.dx * env->space.Nz) : 0;
 
