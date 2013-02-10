@@ -21,7 +21,7 @@ int ic_init_spherical_collapse(struct env *env)
 
     env->space.Nx = 32;
     env->space.Ny = 32;
-    env->space.Nz = 32;
+    env->space.Nz = 1;
     env->space.Nmax = MAX(env->space.Nx, MAX(env->space.Ny, env->space.Nz));
 
     env->space.vNx = env->space.Nx;
@@ -35,7 +35,7 @@ int ic_init_spherical_collapse(struct env *env)
         if (env->space.vNz > 1) env->space.vNz *= 2;
     }
     
-    env->space.dx = .01; //2*M_PI / env->space.Nmax / env->space.dk;
+    env->space.dx = 1.0 / env->space.Nmax; //2*M_PI / env->space.Nmax / env->space.dk;
     env->space.dk = 2*M_PI / (env->space.dx * env->space.Nmax);
 
     assert(env->space.dx != 0);
@@ -96,7 +96,7 @@ int ic_spherical_collapse(struct env *env)
 
     double R = sp->Nx/2 * sp->dx;
 
-    const double rho = 1e3;
+    const double rho = 1e-4 / pow(sp->dx,3);
 
     for (k=0; k < sp->Nz; k++)
     for (j=0; j < sp->Ny; j++)

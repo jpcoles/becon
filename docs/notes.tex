@@ -55,7 +55,14 @@ Since the curl of $v$ vanishes we can chose any path for the integral.
 Also known as a pseudo-spectral method.
 
 Drift, gravity, kick. Rinse and repeat. $\Phi$ is such that we lose the minus sign
-in the kick.
+in the kick. $\Delta x \Delta k = 2\pi / N$.
+
+To prevent numerical error by phase wrapping we must ensure that 
+\begin{equation}
+\frac{\hbar}{2m}\frac{\Delta t}{2} k_\mathrm{max}^2  < \frac{\pi}{4}
+\end{equation}
+
+To prevent quantum pressure $\hbar / m$ must be small.
 
 \begin{equation}
 \begin{array}{rcl}
@@ -73,7 +80,7 @@ in the kick.
 \end{array}
 %
 \begin{array}{rcl}
-\Psi_n &=& \Psi'_n\exp(\frac{i\Phi_n\Delta t}{\hbar}) \\
+\Psi_n &=& \Psi'_n\exp(\frac{im\Phi_n\Delta t}{\hbar}) \\
 \end{array}
 %
 \end{equation}

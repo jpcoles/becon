@@ -22,6 +22,7 @@
 
 #include "ic_spherical_collapse.h"
 #include "ic_infinite_sheet.h"
+#include "ic_two_points.h"
 
 
 
@@ -421,6 +422,7 @@ void gravity_vacuum(struct env * const env, const struct plans *plans)
     int32_t i,j,k;
 
     double prob_tot = 0;
+
     memset(env->state.rho, 0, sizeof(*env->state.rho) * env->state.vN);
 
     #pragma omp parallel for reduction(+:prob_tot) private(j,i,idx, vidx)
@@ -534,11 +536,11 @@ int main(int argc, char **argv)
     env.consts.si.H0 = env.cosmo.H0 / 3.08568025e19; // [s^-1]
     env.consts.si.G  = 6.6738480e-11; // [m^3 kg^-1 s^-2]
 
-    env->consts.in.c = 1;
-    env->consts.in.H0 = 1;
-    env->consts.in.G  = 1;
-    env->consts.in.hbar = pow(env.space.dx,2) * 2*M_PI / env.space.Nmax * ;
-    env->bec.m = 1;
+    env.consts.in.c = 1;
+    env.consts.in.H0 = 1;
+    env.consts.in.G  = 1;
+    //env.consts.in.hbar = pow(env.space.dx,2) * 2*M_PI / env.space.Nmax * ;
+    env.bec.m = 1;
 
     env.bec.m = 2.5e-22 / pow(env.consts.si.c,2);   // [eV / c^2]
     env.bec.m = 2e3 / pow(env.consts.si.c,2);   // [eV / c^2]
@@ -552,6 +554,8 @@ int main(int argc, char **argv)
 #endif
 
     //ic_init_test1D(&env);
+    //ic_init_spherical_collapse(&env);
+    //ic_init_two_points(&env);
     //ic_init_spherical_collapse(&env);
     //ic_init_infinite_sheet(&env);
 
@@ -568,6 +572,7 @@ int main(int argc, char **argv)
         //env.state.rho[idx][1] = 0;
     }
 
+    //alloc_frame_buffer(&fb, imin(256, env.space.vNx), imin(256, env.space.vNy));
     alloc_frame_buffer(&fb, imin(256, env.space.Nx), imin(256, env.space.Ny));
     alloc_matrix(&rrho, env.space.Nmax/2+1, 3);
     alloc_matrix(&rphi, env.space.Nmax/2+1, 3);
@@ -621,32 +626,54 @@ int main(int argc, char **argv)
 
     //ic_test1D(&env);
     //ic_spherical_collapse(&env);
+    //ic_two_points(&env);
+    //ic_spherical_collapse(&env);
     //ic_infinite_sheet(&env);
 
+    //--------------------------------------------------------------------------
+    // Create the softening kernel for vacuum boundaries.
+    //--------------------------------------------------------------------------
     if (env.opts.with_vacuum)
     {
         for (k=0; k < env.space.vNz; k++) { idx = k * env.space.vNx * env.space.vNy;
         for (j=0; j < env.space.vNy; j++) 
         for (i=0; i < env.space.vNx; i++)
         {
-            const int32_t io = i;// - env.space.vNx*(i > (env.space.vNx>>1));
-            const int32_t jo = j;// - env.space.vNy*(j > (env.space.vNy>>1));
-            const int32_t ko = k;// - env.space.vNz*(k > (env.space.vNz>>1));
+            const int32_t io = i - env.space.vNx*(i > (env.space.vNx>>1));
+            const int32_t jo = j - env.space.vNy*(j > (env.space.vNy>>1));
+            const int32_t ko = k - env.space.vNz*(k > (env.space.vNz>>1));
 
-            env.state.S[idx][0] = 1.0;
-#if 0
-            / sqrt(pow(io*env.space.dx,2)
+            double r;
 
-                                           + pow(jo*env.space.dx,2)
-                                           + pow(ko*env.space.dx,2) 
-                                           + pow(env.space.dx,2));
-#endif
+            if (0) //io==0 && jo==0 && ko==0)
+            {
+                r = env.space.dx/2000;
+                env.state.S[idx][0] = 0;
+                env.state.S[idx][1] = 0;
+                idx++;
+                continue;
+            }
+            else
+            {
+                r = sqrt(   pow(io*env.space.dx,2)
+                          + pow(jo*env.space.dx,2)
+                          + pow(ko*env.space.dx,2) 
+                          + pow(env.space.dx/2000,2) 
+                          );
+            }
+
+                 if (env.space.vNz > 1) env.state.S[idx][0] = 1; //1 / r / (4*M_PI);
+            else if (env.space.vNy > 1) env.state.S[idx][0] = log(r); // / (2*M_PI);
+            else if (env.space.vNx > 1) env.state.S[idx][0] = r;
+
             env.state.S[idx][1] = 0;
 
             idx++;
         }}
 
         fftw_execute(plans.S_f);
+        //env.state.S[0][0] = 0;
+        //env.state.S[0][1] = 0;
     }
 
     //env.cosmo.m = 1;
